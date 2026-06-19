@@ -425,8 +425,71 @@ function buildCryptoItems(pool: RssItem[]): RssItem[] {
   return merged
 }
 
+function buildRawFlashes(flashes: RssItem[], rising: { name: string }[]) {
+  const pool = recentFlashPool(flashes)
+  const topicMap = new Map(NARRATIVE_TOPICS)
+  const picked: RssItem[] = []
+  const seen = new Set<string>()
+
+  const tryAdd = (f: RssItem) => {
+    if (seen.has(f.url)) return
+    seen.add(f.url)
+    picked.push(f)
+  }
+
+  for (const topic of rising) {
+    if (picked.length >= 5) break
+    const re = topicMap.get(topic.name)
+    if (!re) continue
+    for (const f of pool) {
+      if (picked.length >= 5) break
+      const text = `${f.title} ${f.body ?? ''}`
+      if (re.test(text)) tryAdd(f)
+    }
+  }
+
+  const fromRising = picked.length
+
+  for (const f of pool) {
+    if (picked.length >= 5) break
+    if (isCrypto(f.title)) tryAdd(f)
+  }
+
+  const addedCrypto = picked.length - fromRising
+
+  for (const f of pool) {
+    if (picked.length >= 5) break
+    tryAdd(f)
+  }
+
+  let sectionTitle = '今日币圈 · 升温话题（Top 5）'
+  if (fromRising === 0 && addedCrypto > 0) {
+    sectionTitle = '今日币圈（Top 5）'
+  } else if (fromRising > 0 && addedCrypto === 0) {
+    sectionTitle = '升温话题（Top 5）'
+  }
+
+  return { items: picked.slice(0, 5), sectionTitle }
+}
+
 function isCrypto(title: string): boolean {
   return CRYPTO_KW.test(title)
+}
+
+function inferDomains(title: string, body: string): string[] {
+  const text = `${title} ${body}`
+  const domains: string[] = []
+  const rules: [RegExp, string][] = [
+    [/AI|OpenAI|监管|法案|半导体|芯片|网信办/i, '科技'],
+    [/比特币|BTC|ETH|加密|DeFi|代币|Tether|稳定币/i, '加密'],
+    [/美联储|央行|降息|通胀|CPI|标普|宏观|利率/i, '宏观'],
+    [/战争|伊朗|以色列|黎巴嫩|停火|导弹|能源/i, '地缘'],
+    [/IPO|上市|交易所|Kalshi|融资|预测市场/i, '商业'],
+  ]
+  for (const [re, label] of rules) {
+    if (re.test(text) && !domains.includes(label)) domains.push(label)
+  }
+  return domains.length ? domains : ['资讯']
 }
 
 function buildPrescient(flashes: RssItem[], posts: RssItem[]) {
@@ -436,7 +499,7 @@ function buildPrescient(flashes: RssItem[], posts: RssItem[]) {
     consensus: /预计|或将|可能/.test(f.title) ? 'seed' : 'brewing',
     title: f.title,
     analysis: (f.body || f.title).slice(0, 160),
-    domains: isCrypto(f.title) ? ['加密'] : ['资讯'],
+    domains: inferDomains(f.title, f.body || f.title),
     sources: sourceFromItem(f),
     relevance: 3,
   }))
@@ -492,6 +555,7 @@ function buildPrescient(flashes: RssItem[], posts: RssItem[]) {
   }
 
   const topShifts = shifts.filter((s) => s.level !== 'noise').slice(0, 3)
+  const rawFlashes = buildRawFlashes(flashes, rising)
 
   return {
     live: true,
@@ -535,7 +599,7 @@ function buildPrescient(flashes: RssItem[], posts: RssItem[]) {
         time: p.publishedAt?.slice(0, 16).replace('T', ' ') ?? '—',
         url: p.url,
       })),
-      flashes: flashes.slice(0, 5).map((f, i) => ({
+      flashes: rawFlashes.items.map((f, i) => ({
         id: `f${i + 1}`,
         kind: 'flash',
         title: f.title,
@@ -544,9 +608,10 @@ function buildPrescient(flashes: RssItem[], posts: RssItem[]) {
         url: f.url,
         author: 'Odaily',
       })),
+      flashSectionTitle: rawFlashes.sectionTitle,
       aiSummary: (() => {
         const themes = rising.slice(0, 2).map((n) => `「${n.name}」`).join('与')
-        const highlights = flashes
+        const highlights = rawFlashes.items
           .slice(0, 3)
           .map((f) => f.title.slice(0, 28))
           .join('；')

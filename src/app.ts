@@ -141,6 +141,7 @@ export function mountApp(root: HTMLElement) {
 
       <section class="sidebar-block">
         <h3>关注领域</h3>
+        <p class="sidebar-hint">影响 M1 排序与全览简报变局展示</p>
         <div class="tag-list">
           ${INTEREST_TAGS.map(
             (tag) => `
@@ -180,7 +181,7 @@ export function mountApp(root: HTMLElement) {
   const renderModulePanel = (mod: ModuleId, d: PrescientData, shifts: ShiftItem[]) => {
     switch (mod) {
       case 'briefing':
-        return renderBriefing(d)
+        return renderBriefing(d, shifts)
       case 'digest':
         return renderDigest(d)
       case 'm1':
@@ -198,7 +199,7 @@ export function mountApp(root: HTMLElement) {
     }
   }
 
-  const renderBriefing = (d: PrescientData) => `
+  const renderBriefing = (d: PrescientData, shifts: ShiftItem[]) => `
     <section class="panel">
       <div class="panel-head">
         <h2>🌅 全览简报</h2>
@@ -212,7 +213,7 @@ export function mountApp(root: HTMLElement) {
       <div class="briefing-grid">
         <div class="brief-card">
           <h3>M1 · 今日变局</h3>
-          ${d.briefing.topShifts.map((s) => renderShiftCompact(s)).join('')}
+          ${shifts.slice(0, 3).map((s) => renderShiftCompact(s)).join('')}
         </div>
         <div class="brief-card">
           <h3>M2 · 叙事温度 Top 3</h3>
@@ -414,7 +415,7 @@ export function mountApp(root: HTMLElement) {
       <div class="panel-head">
         <h2>🔌 原始脉络</h2>
         <span class="divider-line"></span>
-        <p class="panel-desc">Top 5 深度稿与 Top 5 快讯，标题即链接，跳转 Odaily 阅读完整原文</p>
+        <p class="panel-desc">Top 5 深度稿；快讯优先展示升温话题与今日币圈相关条目</p>
       </div>
       <h3 class="raw-section-title">📰 深度报道（Top 5）</h3>
       <div class="raw-list">
@@ -435,7 +436,7 @@ export function mountApp(root: HTMLElement) {
           )
           .join('')}
       </div>
-      <h3 class="raw-section-title">⚡ 最新快讯（Top 5）</h3>
+      <h3 class="raw-section-title">⚡ ${escapeHtml(d.raw.flashSectionTitle ?? '今日币圈 · 升温话题（Top 5）')}</h3>
       <div class="raw-list">
         ${d.raw.flashes
           .map(
@@ -485,6 +486,7 @@ export function mountApp(root: HTMLElement) {
         <div class="compact-main">
           <span class="compact-icon">${sig.icon}</span>
           <span class="compact-text">${escapeHtml(s.title)}</span>
+          ${s.relevance && s.relevance >= 5 ? '<span class="relevance sm">高关联</span>' : ''}
         </div>
       </div>
     `

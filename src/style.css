@@ -208,7 +208,14 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--text-dim);
-  margin-bottom: 14px;
+  margin-bottom: 8px;
+}
+
+.sidebar-hint {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  line-height: 1.4;
+  margin-bottom: 12px;
 }
 
 .module-nav {
@@ -728,6 +735,13 @@ body {
   background: var(--accent-soft);
   color: var(--accent);
   margin-left: auto;
+}
+
+.relevance.sm {
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  margin-left: 6px;
+  flex-shrink: 0;
 }
 
 .shift-card h3 {

@@ -134,6 +134,7 @@ export interface PrescientData {
   raw: {
     articles: RawArticle[]
     flashes: RawArticle[]
+    flashSectionTitle: string
     aiSummary: string
   }
   live?: boolean
@@ -188,7 +189,7 @@ export const MODULES: ModuleMeta[] = [
     id: 'm5',
     code: 'M5',
     name: '原始脉络',
-    desc: '深度报道与快讯标题索引，一点直达 Odaily 原文',
+    desc: '深度报道与快讯标题索引；快讯优先升温话题与今日币圈',
     keywords: ['原文', '直达', '链接', '深度报道', '数据源'],
   },
   {

@@ -99,11 +99,11 @@ def _infer_domains(title: str, body: str) -> list[str]:
     text = f"{title} {body}"
     domains: list[str] = []
     rules = [
-        (re.compile(r"AI|OpenAI|监管|法案", re.I), "科技监管"),
-        (re.compile(r"比特币|BTC|ETH|加密|代币|DeFi", re.I), "加密"),
-        (re.compile(r"美联储|宏观|通胀|GDP|利率", re.I), "宏观"),
-        (re.compile(r"战争|伊朗|以色列|海峡|能源", re.I), "地缘"),
-        (re.compile(r"交易所|上市|IPO", re.I), "商业"),
+        (re.compile(r"AI|OpenAI|监管|法案|半导体|芯片", re.I), "科技"),
+        (re.compile(r"比特币|BTC|ETH|加密|代币|DeFi|Tether|稳定币", re.I), "加密"),
+        (re.compile(r"美联储|宏观|通胀|GDP|利率|央行|标普", re.I), "宏观"),
+        (re.compile(r"战争|伊朗|以色列|黎巴嫩|停火|导弹|能源", re.I), "地缘"),
+        (re.compile(r"交易所|上市|IPO|Kalshi|预测市场", re.I), "商业"),
     ]
     for pattern, label in rules:
         if pattern.search(text) and label not in domains:
@@ -441,6 +441,59 @@ def _extract_odaily_author(body: str) -> str | None:
     return None
 
 
+def _build_raw_flashes(
+    flashes: list[dict[str, Any]],
+    rising: list[dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], str]:
+    pool = _recent_flash_pool(flashes)
+    topic_map = {name: pattern for name, pattern in NARRATIVE_TOPICS}
+    picked: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def try_add(flash: dict[str, Any]) -> None:
+        url = flash.get("url") or ""
+        if url in seen:
+            return
+        seen.add(url)
+        picked.append(flash)
+
+    for topic in rising or []:
+        if len(picked) >= 5:
+            break
+        pattern = topic_map.get(topic["name"])
+        if not pattern:
+            continue
+        for flash in pool:
+            if len(picked) >= 5:
+                break
+            text = f"{flash['title']} {flash.get('body') or ''}"
+            if pattern.search(text):
+                try_add(flash)
+
+    from_rising = len(picked)
+
+    for flash in pool:
+        if len(picked) >= 5:
+            break
+        if _is_crypto(flash["title"]):
+            try_add(flash)
+
+    added_crypto = len(picked) - from_rising
+
+    for flash in pool:
+        if len(picked) >= 5:
+            break
+        try_add(flash)
+
+    section_title = "今日币圈 · 升温话题（Top 5）"
+    if from_rising == 0 and added_crypto > 0:
+        section_title = "今日币圈（Top 5）"
+    elif from_rising > 0 and added_crypto == 0:
+        section_title = "升温话题（Top 5）"
+
+    return picked[:5], section_title
+
+
 def _build_raw(
     posts: list[dict[str, Any]],
     flashes: list[dict[str, Any]],
@@ -458,6 +511,7 @@ def _build_raw(
         }
         for i, p in enumerate(posts[:5])
     ]
+    flash_items, flash_section_title = _build_raw_flashes(flashes, rising)
     flash_rows = [
         {
             "id": f"f{i+1}",
@@ -468,9 +522,9 @@ def _build_raw(
             "url": f.get("url"),
             "author": "Odaily",
         }
-        for i, f in enumerate(flashes[:5])
+        for i, f in enumerate(flash_items)
     ]
-    highlights = "；".join(f["title"][:28] for f in flashes[:3])
+    highlights = "；".join(f["title"][:28] for f in flash_items[:3])
     themes = "与".join(f"「{n['name']}」" for n in (rising or [])[:2])
     if themes:
         ai_summary = (
@@ -482,6 +536,7 @@ def _build_raw(
     return {
         "articles": articles,
         "flashes": flash_rows,
+        "flashSectionTitle": flash_section_title,
         "aiSummary": ai_summary,
     }
 

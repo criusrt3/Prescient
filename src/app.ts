@@ -1,0 +1,711 @@
+import { buildDataLoading, filterShiftsByInterests } from './dataEngine'
+import { loadPrescientData } from './prescientClient'
+import { isVerifiedSourceUrl } from './verifiedSources'
+import {
+  INTEREST_TAGS,
+  MODULES,
+  type AgendaItem,
+  type DisputeTopic,
+  type DigestItem,
+  type InterestTag,
+  type ModuleId,
+  type NarrativeItem,
+  type PrescientData,
+  type RawArticle,
+  type ShiftItem,
+  type SignalLevel,
+  type ConsensusStage,
+  type NewsSource,
+  type ThemeMode,
+} from './types'
+
+const THEME_KEY = 'prescient-theme'
+
+const SIGNAL_LABEL: Record<SignalLevel, { icon: string; label: string; cls: string }> = {
+  hard: { icon: '🔴', label: '硬事实', cls: 'signal-hard' },
+  soft: { icon: '🟡', label: '软信号', cls: 'signal-soft' },
+  noise: { icon: '🟢', label: '背景参考', cls: 'signal-noise' },
+}
+
+const CONSENSUS_LABEL: Record<ConsensusStage, { icon: string; label: string }> = {
+  seed: { icon: '⬜', label: '萌芽' },
+  brewing: { icon: '🟡', label: '发酵中' },
+  consensus: { icon: '🟢', label: '已共识' },
+}
+
+const CAMP_STYLE = {
+  optimistic: { cls: 'camp-opt', label: '乐观派' },
+  pessimistic: { cls: 'camp-pes', label: '悲观派' },
+  neutral: { cls: 'camp-neu', label: '中立' },
+} as const
+
+export function mountApp(root: HTMLElement) {
+  let activeModule: ModuleId = 'briefing'
+  let interests: InterestTag[] = ['科技 / AI', '宏观 / 政策']
+  let data = buildDataLoading()
+  let query = ''
+  let theme: ThemeMode =
+    (localStorage.getItem(THEME_KEY) as ThemeMode | null) ?? 'dark'
+  let digestTimer: ReturnType<typeof setTimeout> | null = null
+  let digestTab: 'hourly' | 'crypto' = 'hourly'
+  let dataRefreshing = false
+
+  const refreshAllData = async () => {
+    if (dataRefreshing) return
+    dataRefreshing = true
+    render()
+    try {
+      data = await loadPrescientData()
+    } finally {
+      dataRefreshing = false
+      render()
+    }
+  }
+
+  const applyTheme = () => {
+    document.documentElement.setAttribute('data-theme', theme)
+  }
+
+  const render = () => {
+    applyTheme()
+    const filteredShifts = filterShiftsByInterests(data.shifts, interests)
+    root.innerHTML = `
+      <div class="shell">
+        ${renderHeader()}
+        <div class="layout">
+          ${renderSidebar()}
+          <main class="main">
+            ${renderSearchBar()}
+            ${renderModulePanel(activeModule, data, filteredShifts)}
+            ${renderModuleFooter()}
+          </main>
+        </div>
+      </div>
+    `
+    bindEvents()
+    scheduleDigestUpdate()
+  }
+
+  const scheduleDigestUpdate = () => {
+    if (digestTimer) clearTimeout(digestTimer)
+    if (activeModule !== 'digest') return
+    const ms = Math.max(data.digest.nextUpdateMinutes * 60 * 1000, 30_000)
+    digestTimer = setTimeout(() => {
+      void refreshAllData()
+    }, ms)
+  }
+
+  const renderHeader = () => `
+    <header class="header">
+      <div class="brand">
+        <div class="brand-mark">先</div>
+        <div>
+          <h1 class="brand-title">先觉 <span>Prescient</span></h1>
+          <p class="brand-sub">在共识形成之前，读懂变化</p>
+        </div>
+      </div>
+      <div class="header-meta">
+        <span class="live-dot"></span>
+        <span>北京时间 ${escapeHtml(data.briefing.generatedAt)}</span>
+        <span class="data-source-tag ${data.live ? 'live' : ''}">${dataRefreshing ? '刷新中…' : escapeHtml(data.sourceLabel ?? (data.live ? 'Odaily 实时' : '离线'))}</span>
+        <button type="button" class="btn-ghost theme-toggle" id="btn-theme" title="切换主题">
+          ${theme === 'dark' ? '☀️ 亮白' : '🌙 深色'}
+        </button>
+        <button type="button" class="btn-ghost" id="btn-refresh">刷新数据</button>
+      </div>
+    </header>
+  `
+
+  const renderSidebar = () => `
+    <aside class="sidebar">
+      <section class="sidebar-block">
+        <h3>模块导航</h3>
+        <nav class="module-nav">
+          ${MODULES.map(
+            (m) => `
+            <button
+              type="button"
+              class="module-btn ${activeModule === m.id ? 'active' : ''}"
+              data-module="${m.id}"
+            >
+              <span class="module-code">${m.code}</span>
+              <span class="module-info">
+                <strong>${m.name}</strong>
+                <small>${m.desc}</small>
+              </span>
+            </button>
+          `,
+          ).join('')}
+        </nav>
+      </section>
+
+      <section class="sidebar-block">
+        <h3>关注领域</h3>
+        <div class="tag-list">
+          ${INTEREST_TAGS.map(
+            (tag) => `
+            <label class="tag-chip ${interests.includes(tag) ? 'on' : ''}">
+              <input type="checkbox" value="${tag}" ${interests.includes(tag) ? 'checked' : ''} />
+              ${tag}
+            </label>
+          `,
+          ).join('')}
+        </div>
+      </section>
+
+      <section class="sidebar-block signal-legend">
+        <h3>图例</h3>
+        <ul>
+          <li><span class="dot hard"></span> 硬事实 — 已确认、不可逆</li>
+          <li><span class="dot soft"></span> 软信号 — 可信但未定论</li>
+          <li><span class="dot noise"></span> 背景参考 — 有热度无实质</li>
+        </ul>
+      </section>
+    </aside>
+  `
+
+  const renderSearchBar = () => `
+    <div class="search-bar">
+      <input
+        id="query-input"
+        type="search"
+        placeholder="输入关键词路由模块，如：明天有什么大事、分歧、热点趋势…"
+        value="${escapeHtml(query)}"
+      />
+      <button type="button" class="btn-primary" id="btn-route">智能路由</button>
+    </div>
+    ${query ? `<p class="route-hint">${routeHint(query)}</p>` : ''}
+  `
+
+  const renderModulePanel = (mod: ModuleId, d: PrescientData, shifts: ShiftItem[]) => {
+    switch (mod) {
+      case 'briefing':
+        return renderBriefing(d)
+      case 'digest':
+        return renderDigest(d)
+      case 'm1':
+        return renderM1(shifts)
+      case 'm2':
+        return renderM2(d)
+      case 'm3':
+        return renderM3(d)
+      case 'm4':
+        return renderM4(d)
+      case 'm5':
+        return renderM5(d)
+      default:
+        return ''
+    }
+  }
+
+  const renderBriefing = (d: PrescientData) => `
+    <section class="panel">
+      <div class="panel-head">
+        <h2>🌅 全览简报</h2>
+        <span class="divider-line"></span>
+      </div>
+      <div class="one-liner">${escapeHtml(d.briefing.oneLiner)}</div>
+
+      <div class="briefing-grid">
+        <div class="brief-card">
+          <h3>M1 · 今日变局</h3>
+          ${d.briefing.topShifts.map((s) => renderShiftCompact(s)).join('')}
+        </div>
+        <div class="brief-card">
+          <h3>M2 · 叙事温度 Top 3</h3>
+          ${d.briefing.hotNarratives.map((n) => renderHeatRow(n)).join('')}
+        </div>
+        <div class="brief-card">
+          <h3>M3 · 明日议程</h3>
+          ${d.briefing.topAgenda.map((a) => renderAgendaCompact(a)).join('')}
+        </div>
+        <div class="brief-card">
+          <h3>M4 · 高分歧话题</h3>
+          ${
+            d.briefing.topDispute
+              ? `
+            <p class="dispute-name">${escapeHtml(d.briefing.topDispute.name)}</p>
+            <div class="dispute-score">分歧指数 ${d.briefing.topDispute.score}/100</div>
+            <p class="muted">${escapeHtml(d.briefing.topDispute.insight)}</p>
+            ${renderSourceActions(d.briefing.topDispute.sources, { compact: true })}
+          `
+              : '<p class="muted">暂无</p>'
+          }
+        </div>
+      </div>
+    </section>
+  `
+
+  const renderDigestLines = (items: DigestItem[]) =>
+    items
+      .map(
+        (item, i) => `
+      <p class="digest-line">
+        <span class="digest-index">${i + 1}.</span>
+        ${escapeHtml(item.text)}
+      </p>
+    `,
+      )
+      .join('')
+
+  const renderDigestHotTopic = (topic: PrescientData['digest']['hotTopic']) => `
+    <p class="digest-hotline">
+      <strong>今日🔥: <a class="digest-hot-link" href="${topic.url}" target="_blank" rel="noopener">${escapeHtml(topic.title)}</a></strong>
+    </p>
+    <a class="digest-url" href="${topic.url}" target="_blank" rel="noopener">${escapeHtml(topic.url)}</a>
+  `
+
+  const renderDigest = (d: PrescientData) => {
+    const cryptoTitle = `币圈快讯 (${d.digest.crypto.dateLabel}）`
+
+    const tabContent = () => {
+      switch (digestTab) {
+        case 'hourly':
+          return `
+            <h3 class="digest-content-title">最新快讯</h3>
+            <p class="digest-meta">
+              更新时间 ${escapeHtml(d.digest.updatedAt)} · ${escapeHtml(d.digest.sourceLabel ?? 'Odaily')} · 每两小时更新 · ${d.digest.nextUpdateMinutes} 分钟后刷新
+              ${d.digest.live ? '<span class="digest-live">· 实时</span>' : ''}
+            </p>
+            <div class="digest-body">${renderDigestLines(d.digest.latestFlashes)}</div>
+          `
+        case 'crypto':
+          return `
+            <h3 class="digest-content-title">${escapeHtml(cryptoTitle)}</h3>
+            <div class="digest-body">${
+              d.digest.crypto.items.length
+                ? renderDigestLines(d.digest.crypto.items)
+                : '<p class="digest-line muted">暂无币圈快讯，请稍后刷新。</p>'
+            }</div>
+            ${renderDigestHotTopic(d.digest.hotTopic)}
+          `
+      }
+    }
+
+    return `
+    <section class="panel digest-panel">
+      <article class="digest-sheet">
+        <nav class="digest-tabs" role="tablist">
+          <button type="button" role="tab" class="digest-tab ${digestTab === 'hourly' ? 'active' : ''}" data-digest-tab="hourly">
+            最新快讯
+            <span class="digest-badge">每两小时</span>
+          </button>
+          <button type="button" role="tab" class="digest-tab ${digestTab === 'crypto' ? 'active' : ''}" data-digest-tab="crypto">
+            币圈快讯
+          </button>
+        </nav>
+        <div class="digest-tab-panel" role="tabpanel">
+          ${tabContent()}
+        </div>
+      </article>
+    </section>
+  `
+  }
+
+  const renderM1 = (shifts: ShiftItem[]) => `
+    <section class="panel">
+      <div class="panel-head">
+        <h2>📌 今日变局</h2>
+        <span class="divider-line"></span>
+        <p class="panel-desc">AI 提炼的核心事件，附信号强度与共识阶段</p>
+      </div>
+      <div class="shift-list">
+        ${shifts.map((s) => renderShiftCard(s)).join('')}
+      </div>
+    </section>
+  `
+
+  const renderM2 = (d: PrescientData) => `
+    <section class="panel">
+      <div class="panel-head">
+        <h2>🌡️ 叙事温度</h2>
+        <span class="divider-line"></span>
+      </div>
+      <div class="narrative-grid">
+        <div class="narrative-col">
+          <h3>📈 升温中</h3>
+          ${
+            d.narratives.rising.length
+              ? d.narratives.rising.map((n) => renderHeatRow(n, true)).join('')
+              : '<p class="muted">今日暂无明确升温话题，请稍后刷新。</p>'
+          }
+        </div>
+        <div class="narrative-col">
+          <h3>📉 退潮中</h3>
+          ${
+            d.narratives.cooling.length
+              ? d.narratives.cooling.map((n) => renderHeatRow(n, true)).join('')
+              : '<p class="muted">今日暂无明确退潮话题，各叙事热度整体偏集中。</p>'
+          }
+        </div>
+      </div>
+      <div class="dispute-list-mini">
+        <h3>🔀 高分歧话题</h3>
+        ${d.narratives.disputes
+          .map(
+            (item) => `
+          <div class="dispute-mini-row">
+            <span>${escapeHtml(item.name)}</span>
+            <div class="dispute-mini-actions">
+              <span class="score-pill">${item.score}</span>
+              ${renderSourceActions(item.sources, { compact: true })}
+            </div>
+          </div>
+        `,
+          )
+          .join('')}
+      </div>
+      <div class="ai-box">
+        <strong>🤖 AI 判断</strong>
+        <p>${escapeHtml(d.narratives.aiJudgment)}</p>
+      </div>
+    </section>
+  `
+
+  const renderM3 = (d: PrescientData) => `
+    <section class="panel">
+      <div class="panel-head">
+        <h2>📅 明日议程</h2>
+        <span class="divider-line"></span>
+      </div>
+      <div class="agenda-timeline">
+        <h3>近期关注</h3>
+        ${
+          d.agenda.tomorrow.length
+            ? d.agenda.tomorrow.map((a) => renderAgendaCard(a)).join('')
+            : '<p class="muted">暂无议程数据，请稍后刷新。</p>'
+        }
+      </div>
+      <div class="agenda-timeline week">
+        <h3>本周后续</h3>
+        ${
+          d.agenda.weekAhead.length
+            ? d.agenda.weekAhead.map((a) => renderAgendaCard(a)).join('')
+            : '<p class="muted">暂无本周议程。</p>'
+        }
+      </div>
+      <div class="ai-box tip">
+        <strong>💡 综合建议</strong>
+        <p>${escapeHtml(d.agenda.tip)}</p>
+      </div>
+    </section>
+  `
+
+  const renderM4 = (d: PrescientData) => `
+    <section class="panel">
+      <div class="panel-head">
+        <h2>⚡ 分歧雷达</h2>
+        <span class="divider-line"></span>
+        <p class="panel-desc">同一事件，不同阵营怎么说</p>
+      </div>
+      ${
+        d.disputes.length
+          ? d.disputes.map((topic) => renderDisputeCard(topic)).join('')
+          : '<p class="muted">暂无分歧话题数据，请稍后刷新。</p>'
+      }
+    </section>
+  `
+
+  const renderM5 = (d: PrescientData) => `
+    <section class="panel">
+      <div class="panel-head">
+        <h2>🔌 原始脉络</h2>
+        <span class="divider-line"></span>
+        <p class="panel-desc">Top 5 深度稿与 Top 5 快讯，标题即链接，跳转 Odaily 阅读完整原文</p>
+      </div>
+      <h3 class="raw-section-title">📰 深度报道（Top 5）</h3>
+      <div class="raw-list">
+        ${d.raw.articles
+          .map(
+            (a, i) => `
+          <article class="raw-card">
+            <div class="raw-index">${i + 1}</div>
+            <div>
+              ${renderRawTitleLink(a)}
+              <div class="raw-meta">
+                ${a.author ? `<span>✍️ ${escapeHtml(a.author)}</span>` : ''}
+                <span>⏱ ${escapeHtml(a.time)}</span>
+              </div>
+            </div>
+          </article>
+        `,
+          )
+          .join('')}
+      </div>
+      <h3 class="raw-section-title">⚡ 最新快讯（Top 5）</h3>
+      <div class="raw-list">
+        ${d.raw.flashes
+          .map(
+            (f, i) => `
+          <article class="raw-card flash">
+            <div class="raw-index">${i + 1}</div>
+            <div>
+              ${renderRawTitleLink(f)}
+              <div class="raw-meta">
+                <span>⏱ ${escapeHtml(f.time)}</span>
+              </div>
+            </div>
+          </article>
+        `,
+          )
+          .join('')}
+      </div>
+      <div class="ai-box">
+        <strong>💡 AI 提炼</strong>
+        <p>${escapeHtml(d.raw.aiSummary)}</p>
+      </div>
+    </section>
+  `
+
+  const renderShiftCard = (s: ShiftItem) => {
+    const sig = SIGNAL_LABEL[s.level]
+    const con = CONSENSUS_LABEL[s.consensus]
+    return `
+      <article class="shift-card ${sig.cls}">
+        <div class="shift-top">
+          <span class="signal-badge">${sig.icon} ${sig.label}</span>
+          <span class="consensus-badge">${con.icon} ${con.label}</span>
+          ${s.relevance && s.relevance >= 4 ? '<span class="relevance">高关联</span>' : ''}
+        </div>
+        <h3>${escapeHtml(s.title)}</h3>
+        <p class="shift-analysis">${escapeHtml(s.analysis)}</p>
+        <div class="domains">${s.domains.map((d) => `<span class="domain-tag">${escapeHtml(d)}</span>`).join('')}</div>
+        ${renderSourceActions(s.sources)}
+      </article>
+    `
+  }
+
+  const renderShiftCompact = (s: ShiftItem) => {
+    const sig = SIGNAL_LABEL[s.level]
+    return `
+      <div class="compact-item">
+        <div class="compact-main">
+          <span class="compact-icon">${sig.icon}</span>
+          <span class="compact-text">${escapeHtml(s.title)}</span>
+        </div>
+        ${renderSourceActions(s.sources, { compact: true })}
+      </div>
+    `
+  }
+
+  const renderHeatRow = (n: NarrativeItem, showBar = false) => `
+    <div class="heat-row ${n.trend}">
+      <div class="heat-label">
+        <span>${escapeHtml(n.name)}</span>
+        <span class="heat-val">${n.heat}°C <small>${n.delta > 0 ? '+' : ''}${n.delta}</small></span>
+      </div>
+      ${
+        showBar
+          ? `<div class="heat-bar"><div class="heat-fill" style="width:${n.heat}%"></div></div>`
+          : ''
+      }
+      ${renderSourceActions(n.sources, { compact: true })}
+    </div>
+  `
+
+  const renderAgendaCard = (a: AgendaItem) => {
+    const sig = SIGNAL_LABEL[a.level]
+    return `
+      <div class="agenda-card">
+        <div class="agenda-time">
+          <span class="signal-badge sm">${sig.icon}</span>
+          <strong>${escapeHtml(a.time)}</strong>
+          <span class="muted">${escapeHtml(a.date)}</span>
+        </div>
+        <h4>${escapeHtml(a.title)}</h4>
+        <p>→ ${escapeHtml(a.impact)}</p>
+        ${renderSourceActions(a.sources, { compact: true })}
+      </div>
+    `
+  }
+
+  const renderAgendaCompact = (a: AgendaItem) => `
+    <div class="compact-item">
+      <div class="compact-main">
+        <span class="compact-icon">${escapeHtml(a.time)}</span>
+        <span class="compact-text">${escapeHtml(a.title)}</span>
+      </div>
+      ${renderSourceActions(a.sources, { compact: true })}
+    </div>
+  `
+
+  const renderDisputeCard = (topic: DisputeTopic) => `
+    <article class="dispute-card">
+      <div class="dispute-head">
+        <h3>${escapeHtml(topic.name)}</h3>
+        <div class="dispute-head-actions">
+          <div class="dispute-score-lg">${topic.score}<small>/100</small></div>
+          ${renderSourceActions(topic.sources, { compact: true })}
+        </div>
+      </div>
+      <div class="camps">
+        ${topic.camps
+          .map((c) => {
+            const style = CAMP_STYLE[c.side]
+            return `
+            <div class="camp ${style.cls}">
+              <div class="camp-label">${style.label} · ${escapeHtml(c.label.split('（')[1]?.replace('）', '') ?? c.label)}</div>
+              <blockquote>${escapeHtml(c.quote)}</blockquote>
+              <div class="camp-basis">依据：${escapeHtml(c.basis)}</div>
+              ${renderSourceActions(sourcesFromOne(c.source), { compact: true })}
+            </div>
+          `
+          })
+          .join('')}
+      </div>
+      <div class="ai-box sm">
+        <strong>📌 解读</strong>
+        <p>${escapeHtml(topic.insight)}</p>
+      </div>
+    </article>
+  `
+
+  const renderModuleFooter = () => `
+    <footer class="module-footer">
+      <p>需要查询其他模块吗？</p>
+      <div class="footer-modules">
+        ${MODULES.filter((m) => m.id !== 'briefing')
+          .map(
+            (m) => `
+          <button type="button" class="footer-mod-btn" data-module="${m.id}">
+            ${m.code} ${m.name}
+          </button>
+        `,
+          )
+          .join('')}
+      </div>
+    </footer>
+  `
+
+  const routeHint = (q: string) => {
+    const lower = q.toLowerCase()
+    for (const m of MODULES) {
+      if (m.keywords.some((k) => lower.includes(k.toLowerCase()) || k.toLowerCase().includes(lower))) {
+        return `路由建议 → ${m.code} ${m.name}`
+      }
+    }
+    return '未匹配到模块，将展示全览简报'
+  }
+
+  const resolveRoute = (q: string): ModuleId => {
+    const lower = q.trim().toLowerCase()
+    if (!lower) return 'briefing'
+    for (const m of MODULES) {
+      if (m.keywords.some((k) => lower.includes(k.toLowerCase()))) return m.id
+    }
+    if (/m[1-5]/.test(lower)) {
+      const num = lower.match(/m([1-5])/)?.[1]
+      if (num) return `m${num}` as ModuleId
+    }
+    if (/快讯|最新快讯|币圈快讯|今日专题/.test(lower)) return 'digest'
+    return 'briefing'
+  }
+
+  const bindEvents = () => {
+    root.querySelectorAll('[data-module]').forEach((el) => {
+      el.addEventListener('click', () => {
+        activeModule = (el as HTMLElement).dataset.module as ModuleId
+        render()
+      })
+    })
+
+    root.querySelector('#btn-refresh')?.addEventListener('click', () => {
+      void refreshAllData()
+    })
+
+    root.querySelector('#btn-theme')?.addEventListener('click', () => {
+      theme = theme === 'dark' ? 'light' : 'dark'
+      localStorage.setItem(THEME_KEY, theme)
+      render()
+    })
+
+    const input = root.querySelector('#query-input') as HTMLInputElement | null
+    input?.addEventListener('input', () => {
+      query = input.value
+      const hint = root.querySelector('.route-hint')
+      if (hint) hint.textContent = routeHint(query)
+    })
+
+    root.querySelector('#btn-route')?.addEventListener('click', () => {
+      activeModule = resolveRoute(query)
+      render()
+    })
+
+    input?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        activeModule = resolveRoute(query)
+        render()
+      }
+    })
+
+    root.querySelectorAll('.tag-chip input').forEach((el) => {
+      el.addEventListener('change', () => {
+        const val = (el as HTMLInputElement).value as InterestTag
+        if ((el as HTMLInputElement).checked) {
+          if (!interests.includes(val)) interests.push(val)
+        } else {
+          interests = interests.filter((t) => t !== val)
+        }
+        render()
+      })
+    })
+
+    root.querySelectorAll('[data-digest-tab]').forEach((el) => {
+      el.addEventListener('click', () => {
+        digestTab = (el as HTMLElement).dataset.digestTab as typeof digestTab
+        render()
+      })
+    })
+  }
+
+  render()
+  void refreshAllData()
+}
+
+function renderRawTitleLink(item: RawArticle): string {
+  const title = escapeHtml(item.title)
+  if (item.url && isVerifiedSourceUrl(item.url)) {
+    return `<h4><a class="raw-title-link" href="${item.url}" target="_blank" rel="noopener noreferrer" title="直达原文">${title}</a></h4>`
+  }
+  return `<h4>${title}</h4>`
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function sourcesFromOne(source?: NewsSource): NewsSource[] | undefined {
+  return source ? [source] : undefined
+}
+
+function renderSourceActions(
+  sources: NewsSource[] | undefined,
+  options: { compact?: boolean; inline?: boolean } = {},
+): string {
+  const linked = sources?.filter((s) => isVerifiedSourceUrl(s.url)) ?? []
+  if (!linked.length) return ''
+  const cls = ['source-actions', options.compact && 'compact', options.inline && 'inline']
+    .filter(Boolean)
+    .join(' ')
+  return `
+    <div class="${cls}">
+      ${linked
+        .map(
+          (s) => `
+        <a
+          class="source-link"
+          href="${s.url}"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="查看来源：${escapeHtml(s.name)}"
+        >${escapeHtml(s.name)}</a>
+      `,
+        )
+        .join('')}
+    </div>
+  `
+}

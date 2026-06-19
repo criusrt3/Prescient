@@ -593,14 +593,27 @@ body {
 }
 
 .one-liner {
-  font-size: 1.05rem;
-  line-height: 1.65;
-  color: var(--text);
-  padding: 18px 20px;
+  padding: 16px 18px;
   background: var(--bg-card);
   border-left: 3px solid var(--accent);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   margin-bottom: 24px;
+}
+
+.one-liner-label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+
+.one-liner p {
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: var(--text);
+  margin: 0;
 }
 
 /* Briefing grid */

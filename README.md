@@ -87,6 +87,16 @@ npm run build
 npm run preview
 ```
 
+### 部署到 Vercel
+
+项目已包含 `api/prescient.ts` Serverless 函数，生产环境会自动提供 `/api/prescient`（拉取 Odaily RSS）。
+
+1. 将仓库导入 [Vercel](https://vercel.com)（根目录为项目根，含 `vercel.json`）
+2. Framework Preset 选 **Vite**，Build Command `npm run build`，Output `dist`
+3. 部署完成后访问站点，数据应显示「Odaily RSS 实时」
+
+本地 `npm run build` 只生成静态 `dist/`，**不含 API**；API 由 Vercel Functions 在运行时提供。
+
 若环境没有全局 `npm`，可用 Cursor 内置 Node：
 
 ```bash
@@ -108,26 +118,32 @@ npm run preview
 
 ```
 prescient-ui/
+├── api/
+│   ├── prescient.ts        # Vercel Serverless：/api/prescient
+│   └── health.ts           # /api/health
+├── lib/
+│   └── prescientCore.ts    # RSS 拉取 + M1–M5 映射（dev/Vercel 共用）
+├── plugins/
+│   └── odailyApi.ts        # Vite dev 中间件
+├── vercel.json
 ├── index.html
-├── vite.config.ts          # /api 代理 → localhost:5181
-├── start.sh                # 一键启动 API + 前端
+├── vite.config.ts
+├── start.sh                # 可选：Python 代理 + 前端
 ├── server/
-│   ├── main.py             # Odaily RSS 代理
+│   ├── main.py             # 可选 Odaily RSS 代理
 │   └── requirements.txt
 └── src/
     ├── main.ts
-    ├── app.ts              # 异步 loadPrescientData + 渲染
+    ├── app.ts
     ├── prescientClient.ts  # fetch /api/prescient
-    ├── dataEngine.ts       # 加载占位 / 离线回退 / 兴趣筛选
-    ├── digestEngine.ts     # 快讯结构辅助
-    ├── verifiedSources.ts
+    ├── dataEngine.ts
     └── style.css
 ```
 
 ### 数据流
 
 ```
-rss.odaily.news  →  server/main.py (/api/prescient)  →  loadPrescientData()  →  全站模块
+rss.odaily.news  →  /api/prescient (Vite 中间件 或 Vercel Function)  →  全站模块
 ```
 
 ---

@@ -523,6 +523,33 @@ def _is_crypto(title: str) -> bool:
     return bool(CRYPTO_KEYWORDS.search(title))
 
 
+def _build_briefing_one_liner(
+    rising: list[dict[str, Any]],
+    cooling: list[dict[str, Any]],
+    top_shifts: list[dict[str, Any]],
+) -> str:
+    hot = "、".join(item["name"] for item in rising[:2])
+    cool = "、".join(item["name"] for item in cooling[:2])
+    hard_count = sum(1 for s in top_shifts if s.get("level") == "hard")
+
+    if hot:
+        line = f"今日舆论主线围绕「{hot}」"
+        if cool:
+            line += f"，「{cool}」等话题温度回落"
+        line += "。"
+        line += (
+            f"已识别 {hard_count} 条硬事实变局，宜优先跟踪地缘与政策后续。"
+            if hard_count > 0
+            else "共识仍在形成，建议结合下方四宫格交叉验证。"
+        )
+        return line
+
+    if top_shifts:
+        return f"今日共 {len(top_shifts)} 条核心变局待跟踪，详见 M1 今日变局。"
+
+    return "正在汇聚 Odaily 最新报道。"
+
+
 def build_prescient_payload(
     flashes: list[dict[str, Any]],
     posts: list[dict[str, Any]],
@@ -537,10 +564,10 @@ def build_prescient_payload(
     digest = _build_digest(flashes, posts)
 
     top_shifts = [s for s in shifts if s["level"] != "noise"][:3]
-    one_liner = (
-        f"今日 Odaily 主线：{' · '.join(s['title'][:22] for s in top_shifts[:2])}。"
-        if top_shifts
-        else "正在汇聚 Odaily 最新报道，请稍后刷新。"
+    one_liner = _build_briefing_one_liner(
+        narratives["rising"],
+        narratives["cooling"],
+        top_shifts,
     )
 
     return {

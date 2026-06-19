@@ -39,7 +39,7 @@ export function buildDataFallback(error: string): PrescientData {
     sourceLabel: '离线',
     briefing: {
       generatedAt: '—',
-      oneLiner: `数据拉取失败：${error}。请重新运行 npm run dev，或使用 ./start.sh 启动完整服务。`,
+      oneLiner: `数据拉取失败：${error}。请确认 /api/prescient 可访问（本地需 npm run dev；Vercel 部署需 api 函数）。`,
       topShifts: [],
       hotNarratives: [],
       topAgenda: [],

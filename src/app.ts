@@ -204,7 +204,10 @@ export function mountApp(root: HTMLElement) {
         <h2>🌅 全览简报</h2>
         <span class="divider-line"></span>
       </div>
-      <div class="one-liner">${escapeHtml(d.briefing.oneLiner)}</div>
+      <div class="one-liner">
+        <span class="one-liner-label">一句话主线</span>
+        <p>${escapeHtml(d.briefing.oneLiner)}</p>
+      </div>
 
       <div class="briefing-grid">
         <div class="brief-card">
@@ -483,7 +486,6 @@ export function mountApp(root: HTMLElement) {
           <span class="compact-icon">${sig.icon}</span>
           <span class="compact-text">${escapeHtml(s.title)}</span>
         </div>
-        ${renderSourceActions(s.sources, { compact: true })}
       </div>
     `
   }

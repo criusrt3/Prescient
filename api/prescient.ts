@@ -1,18 +1,36 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { loadPrescientPayload } from '../lib/prescientCore'
+import { loadPrescientPayload } from './lib/prescientCore'
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export const config = {
+  runtime: 'nodejs20.x',
+  maxDuration: 30,
+}
+
+type ApiRequest = { method?: string }
+type ApiResponse = {
+  statusCode: number
+  setHeader: (name: string, value: string) => void
+  end: (body?: string) => void
+}
+
+function sendJson(res: ApiResponse, status: number, body: unknown) {
+  res.statusCode = status
+  res.setHeader('Content-Type', 'application/json; charset=utf-8')
+  res.end(JSON.stringify(body))
+}
+
+export default async function handler(req: ApiRequest, res: ApiResponse) {
   if (req.method && req.method !== 'GET' && req.method !== 'HEAD') {
-    return res.status(405).json({ error: 'Method not allowed' })
+    sendJson(res, 405, { error: 'Method not allowed' })
+    return
   }
 
   try {
     const payload = await loadPrescientPayload()
     res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=300')
-    return res.status(200).json(payload)
+    sendJson(res, 200, payload)
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error'
     console.error('[api/prescient]', msg)
-    return res.status(502).json({ error: msg })
+    sendJson(res, 502, { error: msg })
   }
 }

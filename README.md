@@ -119,10 +119,10 @@ npm run preview
 ```
 prescient-ui/
 ├── api/
-│   ├── prescient.ts        # Vercel Serverless：/api/prescient
-│   └── health.ts           # /api/health
-├── lib/
-│   └── prescientCore.ts    # RSS 拉取 + M1–M5 映射（dev/Vercel 共用）
+│   ├── lib/
+│   │   └── prescientCore.ts  # RSS 拉取 + M1–M5 映射
+│   ├── prescient.ts          # Vercel Serverless：/api/prescient
+│   └── health.ts
 ├── plugins/
 │   └── odailyApi.ts        # Vite dev 中间件
 ├── vercel.json

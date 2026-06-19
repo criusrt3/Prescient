@@ -2,7 +2,7 @@
  * Vite 内置 Odaily API — dev / preview 时提供 /api/prescient。
  */
 import type { Connect, Plugin } from 'vite'
-import { loadPrescientPayload } from '../lib/prescientCore'
+import { loadPrescientPayload } from '../api/lib/prescientCore'
 
 async function handleApi(
   _req: Connect.IncomingMessage,

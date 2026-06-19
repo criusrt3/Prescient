@@ -1,4 +1,4 @@
-import { loadPrescientPayload } from './lib/prescientCore'
+import { loadPrescientPayload } from './lib/prescientCore.js'
 
 export const config = {
   runtime: 'nodejs',

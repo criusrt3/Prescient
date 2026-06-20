@@ -1,4 +1,4 @@
-export type ModuleId = 'briefing' | 'digest' | 'm1' | 'm2' | 'm3' | 'm4' | 'm5'
+export type ModuleId = 'briefing' | 'digest' | 'm1' | 'm2' | 'm3' | 'm4' | 'm5' | 'm6'
 export type ThemeMode = 'dark' | 'light'
 
 export type SignalLevel = 'hard' | 'soft' | 'noise'
@@ -124,6 +124,51 @@ export function emptyCategoryFlashes(): FlashCategoryBucket[] {
   }))
 }
 
+export type OpportunityKind = 'fundraising' | 'lottery' | 'tge' | 'airdrop'
+
+export interface CryptoOpportunity {
+  id: string
+  kind: OpportunityKind
+  kindLabel: string
+  title: string
+  summary: string
+  highlight?: string
+  time: string
+  url?: string
+  sources?: NewsSource[]
+}
+
+export interface OpportunityBucket {
+  id: OpportunityKind
+  label: string
+  count: number
+  items: CryptoOpportunity[]
+}
+
+export interface CryptoOpportunitiesData {
+  dateLabel: string
+  updatedAt: string
+  summary: string
+  buckets: OpportunityBucket[]
+  highlights: CryptoOpportunity[]
+}
+
+export const OPPORTUNITY_BUCKET_LABELS: { id: OpportunityKind; label: string }[] = [
+  { id: 'fundraising', label: '项目融资' },
+  { id: 'lottery', label: '抽奖活动' },
+  { id: 'tge', label: 'TGE / 发售' },
+  { id: 'airdrop', label: '空投机会' },
+]
+
+export function emptyOpportunityBuckets(): OpportunityBucket[] {
+  return OPPORTUNITY_BUCKET_LABELS.map(({ id, label }) => ({
+    id,
+    label,
+    count: 0,
+    items: [],
+  }))
+}
+
 export interface OdailyFlashDto {
   id: string
   title: string
@@ -174,6 +219,7 @@ export interface PrescientData {
     tip: string
   }
   disputes: DisputeTopic[]
+  opportunities: CryptoOpportunitiesData
   raw: {
     articles: RawArticle[]
     flashes: RawArticle[]
@@ -234,6 +280,13 @@ export const MODULES: ModuleMeta[] = [
     name: '原始脉络',
     desc: '深度报道与快讯标题索引；快讯优先升温话题与今日币圈',
     keywords: ['原文', '直达', '链接', '深度报道', '数据源'],
+  },
+  {
+    id: 'm6',
+    code: 'M6',
+    name: '币圈机会',
+    desc: '项目融资、TGE、空投与抽奖等可参与机会汇总',
+    keywords: ['机会', '融资', 'TGE', '空投', '抽奖', '打新', 'IDO', '参与', '福利'],
   },
   {
     id: 'digest',

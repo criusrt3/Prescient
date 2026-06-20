@@ -1292,6 +1292,113 @@ body {
   text-decoration: underline;
 }
 
+/* Crypto opportunities */
+.opp-meta {
+  margin-top: 8px;
+  font-size: 0.78rem;
+}
+
+.opp-section-title {
+  margin: 28px 0 14px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.opp-count {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-dim);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 15%, transparent);
+}
+
+.opp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.opp-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px 18px;
+  border-left: 3px solid var(--border);
+}
+
+.opp-card.opp-fundraising {
+  border-left-color: #c9a227;
+}
+
+.opp-card.opp-lottery {
+  border-left-color: #e07a5f;
+}
+
+.opp-card.opp-tge {
+  border-left-color: #4a9eed;
+}
+
+.opp-card.opp-airdrop {
+  border-left-color: #6bcb77;
+}
+
+.opp-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.opp-kind {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.opp-time {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.opp-title {
+  margin: 0 0 8px;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  font-weight: 600;
+}
+
+.opp-title-link {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.opp-title-link:hover {
+  color: var(--opt);
+  border-bottom-color: var(--opt);
+}
+
+.opp-highlight {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.opp-summary {
+  margin: 0 0 10px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
 /* AI box */
 .ai-box {
   background: rgba(201, 162, 39, 0.08);

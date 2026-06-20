@@ -687,6 +687,145 @@ function isCrypto(title: string): boolean {
   return CRYPTO_KW.test(title)
 }
 
+type OpportunityKind = 'fundraising' | 'lottery' | 'tge' | 'airdrop'
+
+const OPPORTUNITY_BUCKET_DEFS: { id: OpportunityKind; label: string }[] = [
+  { id: 'fundraising', label: '项目融资' },
+  { id: 'lottery', label: '抽奖活动' },
+  { id: 'tge', label: 'TGE / 发售' },
+  { id: 'airdrop', label: '空投机会' },
+]
+
+function classifyOpportunityKind(title: string, body: string): OpportunityKind | null {
+  if (isPlanetDigestTitle(title)) return null
+  const text = `${flashTitleClean(title)} ${body.slice(0, 400)}`
+  const rules: [OpportunityKind, RegExp][] = [
+    ['tge', /TGE|代币生成事件|公开发售|IDO|IEO|Launchpool|打新|预售|认购(?:开启|启动)|代币发行|新币上线/i],
+    ['airdrop', /空投(?:活动|申领|开启)?|申领资格|快照|空头代币|airdrop/i],
+    [
+      'lottery',
+      /抽奖|幸运(?:用户|大奖)|福利活动|转盘|Galxe|TaskOn|Zealy|积分兑换|领取(?:奖励|福利)|赠品/i,
+    ],
+    [
+      'fundraising',
+      /融资|领投|参投|估值达|募资|种子轮|A\s*轮融资|B\s*轮融资|战略投资|完成.*(?:万|亿)美元|获.*投资/i,
+    ],
+  ]
+  for (const [id, re] of rules) {
+    if (re.test(text)) return id
+  }
+  return null
+}
+
+function extractOpportunityHighlight(kind: OpportunityKind, title: string, body: string): string | undefined {
+  const text = `${flashTitleClean(title)} ${body}`
+  if (kind === 'fundraising') {
+    const amt =
+      text.match(/(?:完成|获|筹集|融资)[^\d]{0,16}(\d+(?:\.\d+)?(?:万|亿)?美元)/i) ??
+      text.match(/(\d+(?:\.\d+)?(?:万|亿)?美元)[^\n]{0,24}(?:融资|投资)/i)
+    const round = text.match(/(种子轮|Pre-Seed|A\s*轮|B\s*轮|C\s*轮|战略投资)/i)
+    if (amt) return amt[0].replace(/\s+/g, ' ').slice(0, 42)
+    if (round) return round[0]
+    return '融资动态'
+  }
+  if (kind === 'tge') {
+    const m = text.match(/(TGE|IDO|IEO|Launchpool|打新|预售)/i)
+    return m?.[0]
+  }
+  if (kind === 'airdrop') return '空投参与'
+  if (kind === 'lottery') return '福利 / 抽奖'
+  return undefined
+}
+
+function toCryptoOpportunity(
+  f: RssItem,
+  kind: OpportunityKind,
+  kindLabel: string,
+): {
+  id: string
+  kind: OpportunityKind
+  kindLabel: string
+  title: string
+  summary: string
+  highlight?: string
+  time: string
+  url?: string
+  sources: { name: string; url: string }[]
+} {
+  const title = flashTitleClean(f.title)
+  const body = (f.body ?? '').replace(/\s+/g, ' ').trim()
+  return {
+    id: f.id,
+    kind,
+    kindLabel,
+    title,
+    summary: body || title,
+    highlight: extractOpportunityHighlight(kind, f.title, body),
+    time: formatFlashTimeBj(f.publishedAt),
+    url: verifiedFlashUrl(f.url),
+    sources: sourceFromItem(f),
+  }
+}
+
+function buildOpportunitiesSummary(
+  buckets: { label: string; count: number }[],
+  highlights: { title: string }[],
+): string {
+  const active = buckets.filter((b) => b.count > 0)
+  if (!active.length) {
+    return '今日暂未从 Odaily 流中识别到明确可参与机会，建议稍后刷新或关注快讯中的融资 / TGE 动态。'
+  }
+  const counts = active.map((b) => `${b.label} ${b.count} 条`).join('、')
+  const top = highlights
+    .slice(0, 2)
+    .map((h) => h.title.slice(0, 28))
+    .join('、')
+  let line = `今日已识别：${counts}。`
+  if (top) line += `重点关注：${top}。`
+  line += '参与前请核实官方渠道、时间与资格要求，注意风险。'
+  return line
+}
+
+function buildCryptoOpportunities(flashes: RssItem[], posts: RssItem[]) {
+  const pool = [...todayFlashPool(flashes), ...posts.slice(0, 25)]
+  const buckets = OPPORTUNITY_BUCKET_DEFS.map(({ id, label }) => ({
+    id,
+    label,
+    count: 0,
+    items: [] as ReturnType<typeof toCryptoOpportunity>[],
+  }))
+  const bucketMap = new Map(buckets.map((b) => [b.id, b]))
+  const seen = new Set<string>()
+  const allItems: ReturnType<typeof toCryptoOpportunity>[] = []
+
+  for (const f of pool) {
+    if (!f.url || seen.has(f.url)) continue
+    const kind = classifyOpportunityKind(f.title, f.body ?? '')
+    if (!kind) continue
+    seen.add(f.url)
+    const def = OPPORTUNITY_BUCKET_DEFS.find((d) => d.id === kind)!
+    const item = toCryptoOpportunity(f, kind, def.label)
+    const bucket = bucketMap.get(kind)!
+    bucket.items.push(item)
+    allItems.push(item)
+  }
+
+  for (const bucket of buckets) {
+    bucket.count = bucket.items.length
+  }
+
+  const highlights = allItems.slice(0, 6)
+  const clock = bjClock()
+
+  return {
+    dateLabel: bjDateLabel(),
+    updatedAt: `${bjDateLabel()} ${String(clock.hour).padStart(2, '0')}:${String(clock.minute).padStart(2, '0')}`,
+    summary: buildOpportunitiesSummary(buckets, highlights),
+    buckets,
+    highlights,
+  }
+}
+
 function inferDomains(title: string, body: string): string[] {
   const text = `${title} ${body}`
   const domains: string[] = []
@@ -769,6 +908,7 @@ function buildPrescient(flashes: RssItem[], posts: RssItem[]) {
 
   const topShifts = shifts.filter((s) => s.level !== 'noise').slice(0, 3)
   const rawFlashes = buildRawFlashes(flashes, rising)
+  const opportunities = buildCryptoOpportunities(flashes, posts)
 
   return {
     live: true,
@@ -802,6 +942,7 @@ function buildPrescient(flashes: RssItem[], posts: RssItem[]) {
     },
     agenda,
     disputes,
+    opportunities,
     raw: {
       articles: posts.slice(0, 5).map((p, i) => ({
         id: `r${i + 1}`,

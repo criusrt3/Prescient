@@ -1,5 +1,14 @@
 import type { PrescientData } from './types'
 import { buildDigestFallback, buildDigestLoading } from './digestEngine'
+import { emptyOpportunityBuckets } from './types'
+
+const emptyOpportunities = () => ({
+  dateLabel: '—',
+  updatedAt: '—',
+  summary: '正在加载币圈机会…',
+  buckets: emptyOpportunityBuckets(),
+  highlights: [],
+})
 
 export function buildDataLoading(): PrescientData {
   const digest = buildDigestLoading()
@@ -24,6 +33,7 @@ export function buildDataLoading(): PrescientData {
     },
     agenda: { tomorrow: [], weekAhead: [], tip: '加载中…' },
     disputes: [],
+    opportunities: emptyOpportunities(),
     raw: {
       articles: [],
       flashes: [{ id: 'l1', kind: 'flash', title: '加载中', body: '加载中', time: '—' }],
@@ -56,6 +66,13 @@ export function buildDataFallback(error: string): PrescientData {
     },
     agenda: { tomorrow: [], weekAhead: [], tip: error },
     disputes: [],
+    opportunities: {
+      dateLabel: '—',
+      updatedAt: '—',
+      summary: `数据不可用：${error}`,
+      buckets: emptyOpportunityBuckets(),
+      highlights: [],
+    },
     raw: {
       articles: [],
       flashes: [],

@@ -781,6 +781,129 @@ def _build_category_flashes(flashes: list[dict[str, Any]]) -> list[dict[str, Any
     return buckets
 
 
+OPPORTUNITY_BUCKET_DEFS = [
+    ("fundraising", "项目融资"),
+    ("lottery", "抽奖活动"),
+    ("tge", "TGE / 发售"),
+    ("airdrop", "空投机会"),
+]
+
+
+def _classify_opportunity_kind(title: str, body: str) -> str | None:
+    if PLANET_DIGEST_RE.match(_flash_title_clean(title)):
+        return None
+    text = f"{_flash_title_clean(title)} {body[:400]}"
+    rules = [
+        ("tge", r"TGE|代币生成事件|公开发售|IDO|IEO|Launchpool|打新|预售|认购(?:开启|启动)|代币发行|新币上线"),
+        ("airdrop", r"空投(?:活动|申领|开启)?|申领资格|快照|空头代币|airdrop"),
+        ("lottery", r"抽奖|幸运(?:用户|大奖)|福利活动|转盘|Galxe|TaskOn|Zealy|积分兑换|领取(?:奖励|福利)|赠品"),
+        ("fundraising", r"融资|领投|参投|估值达|募资|种子轮|A\s*轮融资|B\s*轮融资|战略投资|完成.*(?:万|亿)美元|获.*投资"),
+    ]
+    for kind, pattern in rules:
+        if re.search(pattern, text, re.I):
+            return kind
+    return None
+
+
+def _extract_opportunity_highlight(kind: str, title: str, body: str) -> str | None:
+    text = f"{_flash_title_clean(title)} {body}"
+    if kind == "fundraising":
+        amt = re.search(r"(?:完成|获|筹集|融资)[^\d]{0,16}(\d+(?:\.\d+)?(?:万|亿)?美元)", text, re.I)
+        if not amt:
+            amt = re.search(r"(\d+(?:\.\d+)?(?:万|亿)?美元)[^\n]{0,24}(?:融资|投资)", text, re.I)
+        rnd = re.search(r"(种子轮|Pre-Seed|A\s*轮|B\s*轮|C\s*轮|战略投资)", text, re.I)
+        if amt:
+            return amt.group(0).replace("  ", " ")[:42]
+        if rnd:
+            return rnd.group(0)
+        return "融资动态"
+    if kind == "tge":
+        m = re.search(r"(TGE|IDO|IEO|Launchpool|打新|预售)", text, re.I)
+        return m.group(0) if m else None
+    if kind == "airdrop":
+        return "空投参与"
+    if kind == "lottery":
+        return "福利 / 抽奖"
+    return None
+
+
+def _to_crypto_opportunity(flash: dict[str, Any], kind: str, kind_label: str) -> dict[str, Any]:
+    title = _flash_title_clean(flash["title"])
+    body = re.sub(r"\s+", " ", flash.get("body") or "").strip()
+    url = flash.get("url") or ""
+    row: dict[str, Any] = {
+        "id": str(flash["id"]),
+        "kind": kind,
+        "kindLabel": kind_label,
+        "title": title,
+        "summary": body or title,
+        "time": _format_flash_time_bj(flash.get("publishedAt")),
+        "sources": [_source(url, flash["title"])] if url else [],
+    }
+    highlight = _extract_opportunity_highlight(kind, flash["title"], body)
+    if highlight:
+        row["highlight"] = highlight
+    verified = _verified_flash_url(url)
+    if verified:
+        row["url"] = verified
+    return row
+
+
+def _build_opportunities_summary(
+    buckets: list[dict[str, Any]],
+    highlights: list[dict[str, Any]],
+) -> str:
+    active = [b for b in buckets if b["count"] > 0]
+    if not active:
+        return "今日暂未从 Odaily 流中识别到明确可参与机会，建议稍后刷新或关注快讯中的融资 / TGE 动态。"
+    counts = "、".join(f"{b['label']} {b['count']} 条" for b in active)
+    top = "、".join(h["title"][:28] for h in highlights[:2])
+    line = f"今日已识别：{counts}。"
+    if top:
+        line += f"重点关注：{top}。"
+    line += "参与前请核实官方渠道、时间与资格要求，注意风险。"
+    return line
+
+
+def _build_crypto_opportunities(
+    flashes: list[dict[str, Any]],
+    posts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    pool = _today_flash_pool(flashes) + posts[:25]
+    buckets = [{"id": k, "label": label, "count": 0, "items": []} for k, label in OPPORTUNITY_BUCKET_DEFS]
+    bucket_map = {bucket["id"]: bucket for bucket in buckets}
+    seen: set[str] = set()
+    all_items: list[dict[str, Any]] = []
+
+    for flash in pool:
+        url = flash.get("url") or ""
+        if not url or url in seen:
+            continue
+        body = flash.get("body") or ""
+        kind = _classify_opportunity_kind(flash["title"], body)
+        if not kind:
+            continue
+        seen.add(url)
+        label = next(l for k, l in OPPORTUNITY_BUCKET_DEFS if k == kind)
+        item = _to_crypto_opportunity(flash, kind, label)
+        bucket_map[kind]["items"].append(item)
+        all_items.append(item)
+
+    for bucket in buckets:
+        bucket["count"] = len(bucket["items"])
+
+    highlights = all_items[:6]
+    date_label = _date_label()
+    fetched_at = _now_bj().strftime(f"{date_label} %H:%M")
+    return {
+        "dateLabel": date_label,
+        "updatedAt": fetched_at,
+        "summary": _build_opportunities_summary(buckets, highlights),
+        "buckets": buckets,
+        "highlights": highlights,
+    }
+
+
 def _build_digest(flashes: list[dict[str, Any]], posts: list[dict[str, Any]]) -> dict[str, Any]:
     date_label = _date_label()
     fetched_at = _now_bj().strftime(f"{date_label} %H:%M")
@@ -859,6 +982,7 @@ def build_prescient_payload(
     disputes = _build_disputes(flashes, posts, narratives["rising"])
     raw = _build_raw(posts, flashes, narratives["rising"])
     digest = _build_digest(flashes, posts)
+    opportunities = _build_crypto_opportunities(flashes, posts)
 
     top_shifts = [s for s in shifts if s["level"] != "noise"][:3]
     one_liner = _build_briefing_one_liner(
@@ -883,5 +1007,6 @@ def build_prescient_payload(
         "narratives": narratives,
         "agenda": agenda,
         "disputes": disputes,
+        "opportunities": opportunities,
         "raw": raw,
     }

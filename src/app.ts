@@ -15,6 +15,7 @@ import {
   type ShiftItem,
   type SignalLevel,
   type ConsensusStage,
+  type CryptoOpportunity,
   type NewsSource,
   type ThemeMode,
 } from './types'
@@ -195,6 +196,8 @@ export function mountApp(root: HTMLElement) {
         return renderM4(d)
       case 'm5':
         return renderM5(d)
+      case 'm6':
+        return renderM6(d)
       default:
         return ''
     }
@@ -523,6 +526,75 @@ export function mountApp(root: HTMLElement) {
     </section>
   `
 
+  const OPPORTUNITY_KIND_STYLE: Record<CryptoOpportunity['kind'], { cls: string; emoji: string }> = {
+    fundraising: { cls: 'opp-fundraising', emoji: '💰' },
+    lottery: { cls: 'opp-lottery', emoji: '🎁' },
+    tge: { cls: 'opp-tge', emoji: '🚀' },
+    airdrop: { cls: 'opp-airdrop', emoji: '🪂' },
+  }
+
+  const renderOpportunityCard = (item: CryptoOpportunity) => {
+    const style = OPPORTUNITY_KIND_STYLE[item.kind]
+    const titleHtml =
+      item.url && isVerifiedSourceUrl(item.url)
+        ? `<a class="opp-title-link" href="${item.url}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a>`
+        : escapeHtml(item.title)
+    return `
+      <article class="opp-card ${style.cls}">
+        <div class="opp-card-head">
+          <span class="opp-kind">${style.emoji} ${escapeHtml(item.kindLabel)}</span>
+          <span class="opp-time">${escapeHtml(item.time)}</span>
+        </div>
+        <h4 class="opp-title">${titleHtml}</h4>
+        ${item.highlight ? `<p class="opp-highlight">${escapeHtml(item.highlight)}</p>` : ''}
+        <p class="opp-summary">${escapeHtml(item.summary.slice(0, 140))}${item.summary.length > 140 ? '…' : ''}</p>
+        ${renderSourceActions(item.sources, { compact: true })}
+      </article>
+    `
+  }
+
+  const renderM6 = (d: PrescientData) => {
+    const opp = d.opportunities
+    const activeBuckets = opp.buckets.filter((b) => b.count > 0)
+    return `
+    <section class="panel">
+      <div class="panel-head">
+        <h2>🎯 币圈机会</h2>
+        <span class="divider-line"></span>
+        <p class="panel-desc">项目融资、TGE / 发售、空投与抽奖等可参与机会汇总</p>
+      </div>
+      <div class="ai-box tip">
+        <strong>📋 参与机会摘要</strong>
+        <p>${escapeHtml(opp.summary)}</p>
+        <p class="opp-meta muted">更新 ${escapeHtml(opp.updatedAt)} · 数据来自 Odaily，参与前请核实官方信息</p>
+      </div>
+      ${
+        opp.highlights.length
+          ? `
+        <h3 class="opp-section-title">⭐ 今日值得关注</h3>
+        <div class="opp-grid">${opp.highlights.map((item) => renderOpportunityCard(item)).join('')}</div>
+      `
+          : ''
+      }
+      ${
+        activeBuckets.length
+          ? activeBuckets
+              .map(
+                (bucket) => `
+          <h3 class="opp-section-title">
+            ${escapeHtml(bucket.label)}
+            <span class="opp-count">${bucket.count}</span>
+          </h3>
+          <div class="opp-grid">${bucket.items.map((item) => renderOpportunityCard(item)).join('')}</div>
+        `,
+              )
+              .join('')
+          : '<p class="muted">今日暂未识别到明确参与机会，请稍后刷新。</p>'
+      }
+    </section>
+  `
+  }
+
   const renderShiftCard = (s: ShiftItem) => {
     const sig = SIGNAL_LABEL[s.level]
     const con = CONSENSUS_LABEL[s.consensus]
@@ -685,11 +757,12 @@ export function mountApp(root: HTMLElement) {
     for (const m of MODULES) {
       if (m.keywords.some((k) => lower.includes(k.toLowerCase()))) return m.id
     }
-    if (/m[1-5]/.test(lower)) {
-      const num = lower.match(/m([1-5])/)?.[1]
+    if (/m[1-6]/.test(lower)) {
+      const num = lower.match(/m([1-6])/)?.[1]
       if (num) return `m${num}` as ModuleId
     }
     if (/快讯|最新快讯|币圈快讯|今日专题/.test(lower)) return 'digest'
+    if (/机会|TGE|空投|抽奖|打新|IDO/.test(lower)) return 'm6'
     return 'briefing'
   }
 

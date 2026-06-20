@@ -5,19 +5,12 @@ import type {
   OpportunityFallbackItem,
   PrescientData,
 } from './types'
-import { CRYPTO_INTEREST_TAGS } from './types'
+import { CRYPTO_INTEREST_TAGS, currentOpportunityMonthKey } from './types'
 import { buildDigestFallback, buildDigestLoading } from './digestEngine'
 import { emptyOpportunityMonth } from './types'
 
 function currentMonthKey(): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-  }).formatToParts(new Date())
-  const year = parts.find((p) => p.type === 'year')?.value ?? '2026'
-  const month = parts.find((p) => p.type === 'month')?.value ?? '01'
-  return `${year}-${month}`
+  return currentOpportunityMonthKey()
 }
 
 const emptyOpportunities = () => {
@@ -26,7 +19,8 @@ const emptyOpportunities = () => {
   return {
     dateLabel: '—',
     updatedAt: '—',
-    rangeLabel: '近 30 天',
+    rangeLabel: '近 4 个月',
+    sourceNote: '币圈机会单独拉取 Odaily Web API（近 4 个月）',
     defaultMonth: key,
     months: [emptyOpportunityMonth(key, label)],
     recentFallback: [],
@@ -78,7 +72,11 @@ function matchesOpportunityInterests(item: CryptoOpportunity, interests: string[
   return false
 }
 
-function filterOpportunityMonthSlice<T extends { buckets: CryptoOpportunitiesData['months'][0]['buckets']; fallbackItems: OpportunityFallbackItem[] }>(
+function filterOpportunityMonthSlice<T extends {
+  buckets: CryptoOpportunitiesData['months'][0]['buckets']
+  fallbackItems: OpportunityFallbackItem[]
+  totalCount: number
+}>(
   slice: T,
   interests: string[],
   filterItem: (item: CryptoOpportunity) => boolean,
@@ -88,11 +86,20 @@ function filterOpportunityMonthSlice<T extends { buckets: CryptoOpportunitiesDat
     return { ...bucket, items, count: items.length }
   })
   const totalCount = buckets.reduce((sum, bucket) => sum + bucket.count, 0)
-  const fallbackItems =
+  if (totalCount === 0 && slice.totalCount > 0) {
+    return slice
+  }
+  const filteredFallback =
     totalCount === 0
       ? slice.fallbackItems.filter((item) =>
           matchesInterestTags(`${item.title} ${item.summary}`, interests),
         )
+      : []
+  const fallbackItems =
+    totalCount === 0
+      ? filteredFallback.length > 0
+        ? filteredFallback
+        : slice.fallbackItems
       : []
   return {
     ...slice,
@@ -226,7 +233,8 @@ export function buildDataFallback(error: string): PrescientData {
     opportunities: {
       dateLabel: '—',
       updatedAt: '—',
-      rangeLabel: '近 30 天',
+      rangeLabel: 'Odaily 最新流',
+      sourceNote: 'Odaily RSS 仅保留最新约 20 条快讯/文章，历史月份通常无缓存数据',
       defaultMonth: currentMonthKey(),
       months: [
         {

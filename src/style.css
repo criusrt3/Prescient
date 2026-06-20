@@ -1344,6 +1344,44 @@ body {
   font-size: 0.78rem;
 }
 
+.opp-month-picker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.opp-month-picker-label {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.opp-month-select {
+  min-width: 220px;
+  max-width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.opp-month-select:focus {
+  outline: none;
+  border-color: var(--opt);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--opt) 20%, transparent);
+}
+
+.opp-source-note {
+  margin: 8px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .opp-month-nav {
   display: flex;
   flex-wrap: wrap;

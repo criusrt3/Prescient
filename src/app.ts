@@ -1,5 +1,5 @@
 import { applyInterestFilters, buildDataLoading } from './dataEngine'
-import { loadPrescientData } from './prescientClient'
+import { loadOpportunitiesInto, loadPrescientData } from './prescientClient'
 import { isVerifiedSourceUrl } from './verifiedSources'
 import {
   INTEREST_TAGS,
@@ -21,6 +21,8 @@ import {
   type NewsSource,
   type ThemeMode,
   findOpportunityMonthSlice,
+  buildSelectableMonthKeys,
+  formatOpportunityMonthLabel,
 } from './types'
 
 const THEME_KEY = 'prescient-theme'
@@ -55,15 +57,20 @@ export function mountApp(root: HTMLElement) {
   let digestFlashCategory: string | null = null
   let opportunityMonth: string | null = null
   let dataRefreshing = false
+  let opportunitiesLoading = false
 
   const refreshAllData = async () => {
     if (dataRefreshing) return
     dataRefreshing = true
+    opportunitiesLoading = true
     render()
     try {
       data = await loadPrescientData()
+      render()
+      data = await loadOpportunitiesInto(data)
     } finally {
       dataRefreshing = false
+      opportunitiesLoading = false
       render()
     }
   }
@@ -72,12 +79,11 @@ export function mountApp(root: HTMLElement) {
     document.documentElement.setAttribute('data-theme', theme)
   }
 
-  root.addEventListener('click', (e) => {
-    const monthBtn = (e.target as HTMLElement).closest<HTMLElement>('[data-opp-month]')
-    if (!monthBtn) return
-    const key = monthBtn.getAttribute('data-opp-month')
-    const activeKey = opportunityMonth ?? data.opportunities.defaultMonth
-    if (!key || key === activeKey) return
+  root.addEventListener('change', (e) => {
+    const select = (e.target as HTMLElement).closest<HTMLSelectElement>('#opp-month-select')
+    if (!select) return
+    const key = select.value
+    if (!key || key === (opportunityMonth ?? data.opportunities.defaultMonth)) return
     opportunityMonth = key
     render()
     requestAnimationFrame(() => {
@@ -622,25 +628,29 @@ export function mountApp(root: HTMLElement) {
     const activeBuckets = slice.buckets.filter((b) => b.count > 0)
     const fallbackItems = slice.fallbackItems
     const fallbackScope = slice.fallbackScope ?? null
+    const monthDataMap = new Map(opp.months.map((m) => [m.key, m]))
 
-    const monthNav = `
-      <nav class="opp-month-nav" aria-label="按月筛选">
-        ${opp.months
-          .map(
-            (m) => `
-          <button
-            type="button"
-            class="opp-month-btn ${monthKey === m.key ? 'active' : ''}"
-            data-opp-month="${m.key}"
-            aria-pressed="${monthKey === m.key ? 'true' : 'false'}"
-          >
-            ${escapeHtml(m.label)}
-            <span class="opp-month-count">${m.totalCount}</span>
-          </button>
-        `,
-          )
-          .join('')}
-      </nav>
+    const monthOptions = buildSelectableMonthKeys().map((key) => {
+      const row = monthDataMap.get(key)
+      const label = row?.label ?? formatOpportunityMonthLabel(key)
+      const oppCount = row?.totalCount ?? 0
+      const feedCount = row?.fallbackItems.length ?? 0
+      const suffix =
+        oppCount > 0
+          ? `${oppCount} 条机会`
+          : feedCount > 0
+            ? `${feedCount} 条动态`
+            : '暂无数据'
+      return `<option value="${key}" ${monthKey === key ? 'selected' : ''}>${escapeHtml(label)}（${suffix}）</option>`
+    })
+
+    const monthPicker = `
+      <div class="opp-month-picker">
+        <label class="opp-month-picker-label" for="opp-month-select">选择月份</label>
+        <select id="opp-month-select" class="opp-month-select" aria-label="选择查看月份">
+          ${monthOptions.join('')}
+        </select>
+      </div>
     `
 
     return `
@@ -649,12 +659,13 @@ export function mountApp(root: HTMLElement) {
         <h2>🎯 币圈机会</h2>
         <span class="divider-line"></span>
         <p class="panel-desc">当前查看 <strong>${escapeHtml(slice.label)}</strong> · 项目融资、TGE / 发售、空投与抽奖等可参与机会（${escapeHtml(opp.rangeLabel)}）</p>
+        <p class="opp-source-note muted">${escapeHtml(opp.sourceNote)}${opp.feedEarliestLabel ? ` · 最早报道 ${escapeHtml(opp.feedEarliestLabel)}` : ''}${opportunitiesLoading ? ' · <strong>正在拉取近 4 个月数据…</strong>' : ''}</p>
       </div>
-      ${monthNav}
+      ${monthPicker}
       <div class="ai-box tip">
         <strong>📋 参与机会摘要</strong>
         <p>${escapeHtml(slice.summary)}</p>
-        <p class="opp-meta muted">更新 ${escapeHtml(opp.updatedAt)} · 数据来自 Odaily · ${escapeHtml(opp.rangeLabel)}，参与前请核实官方信息</p>
+        <p class="opp-meta muted">更新 ${escapeHtml(opp.updatedAt)} · ${escapeHtml(opp.sourceNote)}，参与前请核实官方信息</p>
       </div>
       ${
         activeBuckets.length

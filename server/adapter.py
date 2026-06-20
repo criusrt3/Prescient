@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -1019,11 +1020,87 @@ def _build_opportunity_fallback_items(
     return items
 
 
-def _collect_opportunity_month_keys(pool: list[dict[str, Any]], days: int = 30) -> list[str]:
+def _opportunity_feed_pool(flashes: list[dict[str, Any]], posts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    rows: list[dict[str, Any]] = []
+    for flash in [*flashes, *posts]:
+        url = flash.get("url") or ""
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        rows.append(flash)
+
+    def sort_key(item: dict[str, Any]) -> float:
+        iso = item.get("publishedAt")
+        if not iso:
+            return 0.0
+        try:
+            return datetime.fromisoformat(iso).timestamp()
+        except ValueError:
+            return 0.0
+
+    rows.sort(key=sort_key, reverse=True)
+    return rows
+
+
+def _earliest_feed_month_label(pool: list[dict[str, Any]]) -> str | None:
+    stamps: list[float] = []
+    for flash in pool:
+        iso = flash.get("publishedAt")
+        if not iso:
+            continue
+        try:
+            stamps.append(datetime.fromisoformat(iso).timestamp())
+        except ValueError:
+            continue
+    if not stamps:
+        return None
+    return _format_month_label(_bj_month_key(datetime.fromtimestamp(min(stamps), BJ).isoformat()))
+
+
+def _shift_month_key(month_key: str, offset: int) -> str:
+    year, month = map(int, month_key.split("-"))
+    month += offset
+    while month <= 0:
+        month += 12
+        year -= 1
+    while month > 12:
+        month -= 12
+        year += 1
+    return f"{year}-{month:02d}"
+
+
+OPPORTUNITY_PICKER_MONTHS = 4
+_OPP_CACHE_TTL_SEC = 600
+_opp_cache_payload: dict[str, Any] | None = None
+_opp_cache_ts: float = 0
+
+
+def _build_selectable_month_keys(months_back: int = OPPORTUNITY_PICKER_MONTHS) -> list[str]:
+    start = _bj_month_key()
+    return [_shift_month_key(start, -i) for i in range(months_back)]
+
+
+def _build_empty_picker_month_slice(key: str, earliest_label: str | None) -> dict[str, Any]:
+    label = _format_month_label(key)
+    hint = (
+        f"当前数据最早可回溯至 {earliest_label}。"
+        if earliest_label
+        else "请稍后刷新或切换较近月份。"
+    )
+    return {
+        "key": key,
+        "label": label,
+        "summary": f"{label}暂无数据。{hint}",
+        "totalCount": 0,
+        "buckets": _build_opportunity_buckets([]),
+        "fallbackItems": [],
+    }
+
+
+def _collect_opportunity_month_keys(pool: list[dict[str, Any]]) -> list[str]:
     keys: set[str] = set()
     keys.add(_bj_month_key())
-    cutoff = datetime.now(BJ).timestamp() - days * 24 * 60 * 60
-    keys.add(_bj_month_key(datetime.fromtimestamp(cutoff, BJ).isoformat()))
     for flash in pool:
         published = flash.get("publishedAt")
         if published:
@@ -1051,7 +1128,8 @@ def _build_crypto_opportunities(
     flashes: list[dict[str, Any]],
     posts: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    pool = _recent_month_pool(flashes, posts, 30)
+    pool = _opportunity_feed_pool(flashes, posts)
+    feed_earliest_label = _earliest_feed_month_label(pool)
     by_month: dict[str, list[dict[str, Any]]] = {}
     opportunity_urls: set[str] = set()
 
@@ -1070,9 +1148,9 @@ def _build_crypto_opportunities(
 
     recent_fallback = _build_opportunity_fallback_items(pool, opportunity_urls, None, 10)
     current_key = _bj_month_key()
-    month_keys = _collect_opportunity_month_keys(pool, 30)
-    months = []
-    for key in month_keys:
+    data_month_keys = _collect_opportunity_month_keys(pool)
+    built_months: dict[str, dict[str, Any]] = {}
+    for key in data_month_keys:
         items = by_month.get(key, [])
         buckets = _build_opportunity_buckets(items)
         label = _format_month_label(key)
@@ -1084,24 +1162,29 @@ def _build_crypto_opportunities(
             month_fallback,
             recent_fallback,
         )
-        months.append(
-            {
-                "key": key,
-                "label": label,
-                "summary": _build_month_opportunities_summary(label, buckets, items, fallback_meta),
-                "totalCount": len(items),
-                "buckets": buckets,
-                "fallbackItems": fallback_items,
-                **({"fallbackScope": fallback_meta["scope"]} if fallback_meta else {}),
-            }
-        )
+        built_months[key] = {
+            "key": key,
+            "label": label,
+            "summary": _build_month_opportunities_summary(label, buckets, items, fallback_meta),
+            "totalCount": len(items),
+            "buckets": buckets,
+            "fallbackItems": fallback_items,
+            **({"fallbackScope": fallback_meta["scope"]} if fallback_meta else {}),
+        }
+
+    months = [
+        built_months.get(key) or _build_empty_picker_month_slice(key, feed_earliest_label)
+        for key in _build_selectable_month_keys(OPPORTUNITY_PICKER_MONTHS)
+    ]
 
     date_label = _date_label()
     fetched_at = _now_bj().strftime(f"{date_label} %H:%M")
     return {
         "dateLabel": date_label,
         "updatedAt": fetched_at,
-        "rangeLabel": "近 30 天",
+        "rangeLabel": "近 4 个月",
+        "sourceNote": "币圈机会单独拉取 Odaily Web API 快讯分页（近 4 个月），其余模块仍用 RSS 最新流",
+        "feedEarliestLabel": feed_earliest_label,
         "defaultMonth": current_key,
         "months": months,
         "recentFallback": recent_fallback,
@@ -1194,6 +1277,21 @@ def _build_briefing_one_liner(
         return f"今日暂未形成清晰宏观主线，但识别到 {len(top_opportunities)} 条币圈参与机会，建议优先查看 M6。"
 
     return "正在汇聚 Odaily 最新报道。"
+
+
+def build_opportunities_payload() -> dict[str, Any]:
+    global _opp_cache_payload, _opp_cache_ts
+    now = time.time()
+    if _opp_cache_payload is not None and now - _opp_cache_ts < _OPP_CACHE_TTL_SEC:
+        return _opp_cache_payload
+
+    from odaily_web import fetch_odaily_opportunity_feed
+
+    flashes, posts = fetch_odaily_opportunity_feed()
+    payload = _build_crypto_opportunities(flashes, posts)
+    _opp_cache_payload = payload
+    _opp_cache_ts = now
+    return payload
 
 
 def build_prescient_payload(

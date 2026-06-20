@@ -3,6 +3,10 @@
  * 供 Vite dev 中间件与 Vercel Serverless 共用。
  */
 
+import { fetchOdailyOpportunityFeed, type OdailyFeedItem } from './odailyWebApi'
+
+const OPPORTUNITY_PICKER_MONTHS = 4
+
 const RSS_FLASH = 'https://rss.odaily.news/rss/newsflash'
 const RSS_POST = 'https://rss.odaily.news/rss/post'
 const UA = 'Prescient-UI/0.2 (+vite-odaily-proxy)'
@@ -847,6 +851,72 @@ function isWithinLastDays(iso: string | undefined, days: number): boolean {
   return new Date(iso).getTime() >= cutoff
 }
 
+function opportunityFeedPool(flashes: RssItem[], posts: RssItem[]): RssItem[] {
+  const seen = new Set<string>()
+  const out: RssItem[] = []
+  for (const f of [...flashes, ...posts]) {
+    if (!f.url || seen.has(f.url)) continue
+    seen.add(f.url)
+    out.push(f)
+  }
+  return out.sort((a, b) => {
+    const at = a.publishedAt ? new Date(a.publishedAt).getTime() : 0
+    const bt = b.publishedAt ? new Date(b.publishedAt).getTime() : 0
+    return bt - at
+  })
+}
+
+function earliestFeedMonthLabel(pool: RssItem[]): string | undefined {
+  const stamps = pool
+    .map((f) => f.publishedAt)
+    .filter((iso): iso is string => Boolean(iso))
+    .map((iso) => new Date(iso).getTime())
+  if (!stamps.length) return undefined
+  return formatMonthLabel(bjMonthKey(new Date(Math.min(...stamps)).toISOString()))
+}
+
+function shiftMonthKeyLocal(monthKey: string, offset: number): string {
+  const [y, m] = monthKey.split('-').map(Number)
+  let year = y
+  let month = m + offset
+  while (month <= 0) {
+    month += 12
+    year -= 1
+  }
+  while (month > 12) {
+    month -= 12
+    year += 1
+  }
+  return `${year}-${String(month).padStart(2, '0')}`
+}
+
+function buildSelectableMonthKeys(monthsBack = OPPORTUNITY_PICKER_MONTHS): string[] {
+  const start = bjMonthKey()
+  return Array.from({ length: monthsBack }, (_, i) => shiftMonthKeyLocal(start, -i))
+}
+
+function buildEmptyPickerMonthSlice(key: string, earliestLabel?: string): {
+  key: string
+  label: string
+  summary: string
+  totalCount: number
+  buckets: ReturnType<typeof buildOpportunityBuckets>
+  fallbackItems: ReturnType<typeof toOpportunityFallback>[]
+} {
+  const label = formatMonthLabel(key)
+  const hint = earliestLabel
+    ? `Odaily RSS 仅约 20 条最新报道，当前最早可回溯至 ${earliestLabel}。`
+    : '请稍后刷新或切换较近月份。'
+  return {
+    key,
+    label,
+    summary: `${label}暂无数据。${hint}`,
+    totalCount: 0,
+    buckets: buildOpportunityBuckets([]),
+    fallbackItems: [],
+  }
+}
+
 function recentMonthPool(flashes: RssItem[], posts: RssItem[], days = 30): RssItem[] {
   const seen = new Set<string>()
   const out: RssItem[] = []
@@ -961,11 +1031,9 @@ function buildMonthOpportunitiesSummary(
   return line
 }
 
-function collectOpportunityMonthKeys(pool: RssItem[], days = 30): string[] {
+function collectOpportunityMonthKeys(pool: RssItem[]): string[] {
   const keys = new Set<string>()
   keys.add(bjMonthKey())
-  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000
-  keys.add(bjMonthKey(new Date(cutoff).toISOString()))
   for (const f of pool) {
     if (f.publishedAt) keys.add(bjMonthKey(f.publishedAt))
   }
@@ -993,7 +1061,8 @@ function resolveMonthFallback(
 }
 
 function buildCryptoOpportunities(flashes: RssItem[], posts: RssItem[]) {
-  const pool = recentMonthPool(flashes, posts, 30)
+  const pool = opportunityFeedPool(flashes, posts)
+  const feedEarliestLabel = earliestFeedMonthLabel(pool)
   const byMonth = new Map<string, ReturnType<typeof toCryptoOpportunity>[]>()
   const opportunityUrls = new Set<string>()
 
@@ -1012,37 +1081,48 @@ function buildCryptoOpportunities(flashes: RssItem[], posts: RssItem[]) {
 
   const recentFallback = buildOpportunityFallbackItems(pool, opportunityUrls, null, 10)
   const currentKey = bjMonthKey()
-  const monthKeys = collectOpportunityMonthKeys(pool, 30)
+  const dataMonthKeys = collectOpportunityMonthKeys(pool)
 
-  const months = monthKeys.map((key) => {
-    const items = byMonth.get(key) ?? []
-    const buckets = buildOpportunityBuckets(items)
-    const label = formatMonthLabel(key)
-    const monthFallback = buildOpportunityFallbackItems(pool, opportunityUrls, key, 10)
-    const { items: fallbackItems, meta: fallbackMeta } = resolveMonthFallback(
-      key,
-      currentKey,
-      items.length,
-      monthFallback,
-      recentFallback,
-    )
-    return {
-      key,
-      label,
-      summary: buildMonthOpportunitiesSummary(label, buckets, items, fallbackMeta),
-      totalCount: items.length,
-      buckets,
-      fallbackItems,
-      ...(fallbackMeta ? { fallbackScope: fallbackMeta.scope } : {}),
-    }
-  })
+  const builtMonths = new Map(
+    dataMonthKeys.map((key) => {
+      const items = byMonth.get(key) ?? []
+      const buckets = buildOpportunityBuckets(items)
+      const label = formatMonthLabel(key)
+      const monthFallback = buildOpportunityFallbackItems(pool, opportunityUrls, key, 10)
+      const { items: fallbackItems, meta: fallbackMeta } = resolveMonthFallback(
+        key,
+        currentKey,
+        items.length,
+        monthFallback,
+        recentFallback,
+      )
+      return [
+        key,
+        {
+          key,
+          label,
+          summary: buildMonthOpportunitiesSummary(label, buckets, items, fallbackMeta),
+          totalCount: items.length,
+          buckets,
+          fallbackItems,
+          ...(fallbackMeta ? { fallbackScope: fallbackMeta.scope } : {}),
+        },
+      ] as const
+    }),
+  )
+
+  const months = buildSelectableMonthKeys().map(
+    (key) => builtMonths.get(key) ?? buildEmptyPickerMonthSlice(key, feedEarliestLabel),
+  )
 
   const clock = bjClock()
 
   return {
     dateLabel: bjDateLabel(),
     updatedAt: `${bjDateLabel()} ${String(clock.hour).padStart(2, '0')}:${String(clock.minute).padStart(2, '0')}`,
-    rangeLabel: '近 30 天',
+    rangeLabel: '近 4 个月',
+    sourceNote: '币圈机会单独拉取 Odaily Web API 快讯分页（近 4 个月），其余模块仍用 RSS 最新流',
+    feedEarliestLabel,
     defaultMonth: currentKey,
     months,
     recentFallback,
@@ -1200,6 +1280,35 @@ function buildPrescient(flashes: RssItem[], posts: RssItem[]) {
         return `过去数小时 Odaily 报道主线：${highlights}。`
       })(),
     },
+  }
+}
+
+const OPP_CACHE_TTL_MS = 10 * 60 * 1000
+let opportunitiesCache: { payload: ReturnType<typeof buildCryptoOpportunities>; ts: number } | null =
+  null
+
+export async function loadOpportunitiesPayload() {
+  const now = Date.now()
+  if (opportunitiesCache && now - opportunitiesCache.ts < OPP_CACHE_TTL_MS) {
+    return opportunitiesCache.payload
+  }
+
+  const { flashes, posts } = await fetchOdailyOpportunityFeed()
+  const payload = buildCryptoOpportunities(
+    flashes.map(feedItemToRss),
+    posts.map(feedItemToRss),
+  )
+  opportunitiesCache = { payload, ts: now }
+  return payload
+}
+
+function feedItemToRss(item: OdailyFeedItem): RssItem {
+  return {
+    id: item.id,
+    title: item.title,
+    url: item.url,
+    publishedAt: item.publishedAt,
+    body: item.body,
   }
 }
 

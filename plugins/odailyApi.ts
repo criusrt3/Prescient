@@ -2,7 +2,7 @@
  * Vite 内置 Odaily API — dev / preview 时提供 /api/prescient。
  */
 import type { Connect, Plugin } from 'vite'
-import { loadPrescientPayload } from '../api/lib/prescientCore'
+import { loadOpportunitiesPayload, loadPrescientPayload } from '../api/lib/prescientCore'
 
 async function handleApi(
   _req: Connect.IncomingMessage,
@@ -14,6 +14,13 @@ async function handleApi(
     if (path === '/api/health') {
       res.setHeader('Content-Type', 'application/json')
       res.end(JSON.stringify({ ok: true, service: 'vite-odaily-proxy' }))
+      return
+    }
+    if (path === '/api/opportunities') {
+      const payload = await loadOpportunitiesPayload()
+      res.setHeader('Content-Type', 'application/json')
+      res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600')
+      res.end(JSON.stringify(payload))
       return
     }
     if (path === '/api/prescient') {

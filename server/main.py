@@ -19,7 +19,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from adapter import build_prescient_payload
+from adapter import build_opportunities_payload, build_prescient_payload
 from skill_bridge import skill_status
 
 RSS_FLASH = "https://rss.odaily.news/rss/newsflash"
@@ -109,6 +109,12 @@ def _load_rss_feeds() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
 @app.get("/api/health")
 def health():
     return {"ok": True, "service": "prescient-odaily-proxy", "skill": skill_status()}
+
+
+@app.get("/api/opportunities")
+def opportunities_data():
+    """币圈机会专用 — Odaily Web API 分页（近 4 个月）。"""
+    return build_opportunities_payload()
 
 
 @app.get("/api/prescient")

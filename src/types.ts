@@ -178,10 +178,48 @@ export interface CryptoOpportunitiesData {
   dateLabel: string
   updatedAt: string
   rangeLabel: string
+  /** Odaily RSS 数据范围说明 */
+  sourceNote: string
+  /** 当前 feed 最早报道月份，如 2026年06月 */
+  feedEarliestLabel?: string
   defaultMonth: string
   months: OpportunityMonthSlice[]
   /** 近 30 天币圈相关报道（机会规则未命中时作兜底展示） */
   recentFallback: OpportunityFallbackItem[]
+}
+
+/** 月份下拉可选数量（近 4 个月） */
+export const OPPORTUNITY_MONTH_PICKER_COUNT = 4
+
+export function currentOpportunityMonthKey(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(new Date())
+  const year = parts.find((p) => p.type === 'year')?.value ?? '2026'
+  const month = parts.find((p) => p.type === 'month')?.value ?? '01'
+  return `${year}-${month}`
+}
+
+export function shiftMonthKey(monthKey: string, offset: number): string {
+  const [y, m] = monthKey.split('-').map(Number)
+  let year = y
+  let month = m + offset
+  while (month <= 0) {
+    month += 12
+    year -= 1
+  }
+  while (month > 12) {
+    month -= 12
+    year += 1
+  }
+  return `${year}-${String(month).padStart(2, '0')}`
+}
+
+export function buildSelectableMonthKeys(monthsBack = OPPORTUNITY_MONTH_PICKER_COUNT): string[] {
+  const start = currentOpportunityMonthKey()
+  return Array.from({ length: monthsBack }, (_, i) => shiftMonthKey(start, -i))
 }
 
 export const OPPORTUNITY_BUCKET_LABELS: { id: OpportunityKind; label: string }[] = [
@@ -205,6 +243,11 @@ export function formatOpportunityMonthLabel(monthKey: string): string {
   return `${year}年${month}月`
 }
 
+export function pickBriefingTopOpportunities(opp: CryptoOpportunitiesData): CryptoOpportunity[] {
+  const slice = findOpportunityMonthSlice(opp, opp.defaultMonth)
+  return slice.buckets.flatMap((bucket) => bucket.items).slice(0, 3)
+}
+
 export function findOpportunityMonthSlice(
   opp: CryptoOpportunitiesData,
   monthKey: string,
@@ -212,9 +255,12 @@ export function findOpportunityMonthSlice(
   const found = opp.months.find((m) => m.key === monthKey)
   if (found) return found
   const label = formatOpportunityMonthLabel(monthKey)
+  const hint = opp.feedEarliestLabel
+    ? `当前数据最早可回溯至 ${opp.feedEarliestLabel}，请切换较近月份。`
+    : '请稍后刷新或切换较近月份。'
   return {
     ...emptyOpportunityMonth(monthKey, label),
-    summary: `${label}暂未识别到明确可参与机会，可切换其他月份或稍后刷新。`,
+    summary: `${label}暂无数据。${hint}`,
   }
 }
 

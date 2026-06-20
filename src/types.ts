@@ -133,7 +133,10 @@ export interface CryptoOpportunity {
   title: string
   summary: string
   highlight?: string
+  /** 展示用：MM-DD HH:mm */
+  date: string
   time: string
+  monthKey: string
   url?: string
   sources?: NewsSource[]
 }
@@ -145,12 +148,38 @@ export interface OpportunityBucket {
   items: CryptoOpportunity[]
 }
 
+/** 未命中机会规则时的同期币圈相关报道 */
+export interface OpportunityFallbackItem {
+  id: string
+  title: string
+  summary: string
+  date: string
+  time: string
+  monthKey: string
+  url?: string
+  sources?: NewsSource[]
+}
+
+export interface OpportunityMonthSlice {
+  key: string
+  label: string
+  summary: string
+  totalCount: number
+  buckets: OpportunityBucket[]
+  /** 该月未归类为机会、但相关的币圈报道 */
+  fallbackItems: OpportunityFallbackItem[]
+  /** 无机会时 fallback 的数据范围 */
+  fallbackScope?: 'month' | 'recent'
+}
+
 export interface CryptoOpportunitiesData {
   dateLabel: string
   updatedAt: string
-  summary: string
-  buckets: OpportunityBucket[]
-  highlights: CryptoOpportunity[]
+  rangeLabel: string
+  defaultMonth: string
+  months: OpportunityMonthSlice[]
+  /** 近 30 天币圈相关报道（机会规则未命中时作兜底展示） */
+  recentFallback: OpportunityFallbackItem[]
 }
 
 export const OPPORTUNITY_BUCKET_LABELS: { id: OpportunityKind; label: string }[] = [
@@ -167,6 +196,17 @@ export function emptyOpportunityBuckets(): OpportunityBucket[] {
     count: 0,
     items: [],
   }))
+}
+
+export function emptyOpportunityMonth(key: string, label: string): OpportunityMonthSlice {
+  return {
+    key,
+    label,
+    summary: '加载中…',
+    totalCount: 0,
+    buckets: emptyOpportunityBuckets(),
+    fallbackItems: [],
+  }
 }
 
 export interface OdailyFlashDto {

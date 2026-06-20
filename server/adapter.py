@@ -789,19 +789,43 @@ OPPORTUNITY_BUCKET_DEFS = [
 ]
 
 
+def _is_fundraising_opportunity(title: str, body: str) -> bool:
+    text = f"{title} {body}"
+    if re.search(r"投研|研报|研究报告|会重演|流动性正在|看跌|看多|观点：|警告|预测|创始人：|CEO：|分析师|主席：|董事长：", title, re.I):
+        if not re.search(
+            r"(?:完成|获|宣布|领投|估值达).{0,20}(?:融资|亿美元|万美元)|种子轮|A\s*轮融资|B\s*轮融资",
+            title,
+            re.I,
+        ):
+            return False
+    if re.search(r"融资市场|证券融资|链上证券", title, re.I) and not re.search(
+        r"(?:完成|获|宣布|领投|种子轮|A\s*轮)", title, re.I
+    ):
+        return False
+    return bool(
+        re.search(
+            r"(?:完成|获|宣布|筹集).{0,12}(?:融资|投资)|领投|参投|估值达|募资|种子轮|A\s*轮融资|"
+            r"B\s*轮融资|战略投资|完成\s*\d+(?:\.\d+)?(?:万|亿)?美元",
+            text,
+            re.I,
+        )
+    )
+
+
 def _classify_opportunity_kind(title: str, body: str) -> str | None:
     if PLANET_DIGEST_RE.match(_flash_title_clean(title)):
         return None
-    text = f"{_flash_title_clean(title)} {body[:400]}"
-    rules = [
-        ("tge", r"TGE|代币生成事件|公开发售|IDO|IEO|Launchpool|打新|预售|认购(?:开启|启动)|代币发行|新币上线"),
-        ("airdrop", r"空投(?:活动|申领|开启)?|申领资格|快照|空头代币|airdrop"),
-        ("lottery", r"抽奖|幸运(?:用户|大奖)|福利活动|转盘|Galxe|TaskOn|Zealy|积分兑换|领取(?:奖励|福利)|赠品"),
-        ("fundraising", r"融资|领投|参投|估值达|募资|种子轮|A\s*轮融资|B\s*轮融资|战略投资|完成.*(?:万|亿)美元|获.*投资"),
-    ]
-    for kind, pattern in rules:
-        if re.search(pattern, text, re.I):
-            return kind
+    clean = _flash_title_clean(title)
+    snippet = body[:400]
+    text = f"{clean} {snippet}"
+    if re.search(r"TGE|代币生成事件|公开发售|IDO|IEO|Launchpool|打新|预售|认购(?:开启|启动)|代币发行|新币上线", text, re.I):
+        return "tge"
+    if re.search(r"空投(?:活动|申领|开启)?|申领资格|快照|空头代币|airdrop", text, re.I):
+        return "airdrop"
+    if re.search(r"抽奖|幸运(?:用户|大奖)|福利活动|转盘|Galxe|TaskOn|Zealy|积分兑换|领取(?:奖励|福利)|赠品", text, re.I):
+        return "lottery"
+    if _is_fundraising_opportunity(clean, snippet):
+        return "fundraising"
     return None
 
 
@@ -816,7 +840,7 @@ def _extract_opportunity_highlight(kind: str, title: str, body: str) -> str | No
             return amt.group(0).replace("  ", " ")[:42]
         if rnd:
             return rnd.group(0)
-        return "融资动态"
+        return None
     if kind == "tge":
         m = re.search(r"(TGE|IDO|IEO|Launchpool|打新|预售)", text, re.I)
         return m.group(0) if m else None
@@ -827,17 +851,114 @@ def _extract_opportunity_highlight(kind: str, title: str, body: str) -> str | No
     return None
 
 
+def _bj_month_key(iso: str | None = None) -> str:
+    dt = datetime.fromisoformat(iso) if iso else _now_bj()
+    if iso:
+        dt = dt.astimezone(BJ)
+    return dt.strftime("%Y-%m")
+
+
+def _format_month_label(month_key: str) -> str:
+    year, month = month_key.split("-")
+    return f"{year}年{month}月"
+
+
+def _format_opportunity_date(iso: str | None) -> str:
+    if not iso:
+        return "--"
+    try:
+        return datetime.fromisoformat(iso).astimezone(BJ).strftime("%m-%d %H:%M")
+    except ValueError:
+        return "--"
+
+
+def _is_within_last_days(iso: str | None, days: int = 30) -> bool:
+    if not iso:
+        return False
+    try:
+        ts = datetime.fromisoformat(iso).timestamp()
+    except ValueError:
+        return False
+    cutoff = datetime.now(BJ).timestamp() - days * 24 * 60 * 60
+    return ts >= cutoff
+
+
+def _recent_month_pool(flashes: list[dict[str, Any]], posts: list[dict[str, Any]], days: int = 30) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    rows: list[dict[str, Any]] = []
+    for flash in [*flashes, *posts]:
+        url = flash.get("url") or ""
+        if not url or url in seen:
+            continue
+        if not _is_within_last_days(flash.get("publishedAt"), days):
+            continue
+        seen.add(url)
+        rows.append(flash)
+
+    def sort_key(item: dict[str, Any]) -> float:
+        iso = item.get("publishedAt")
+        if not iso:
+            return 0.0
+        try:
+            return datetime.fromisoformat(iso).timestamp()
+        except ValueError:
+            return 0.0
+
+    rows.sort(key=sort_key, reverse=True)
+    return rows
+
+
+def _build_opportunity_buckets(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    buckets = [{"id": k, "label": label, "count": 0, "items": []} for k, label in OPPORTUNITY_BUCKET_DEFS]
+    bucket_map = {bucket["id"]: bucket for bucket in buckets}
+    for item in items:
+        bucket_map[item["kind"]]["items"].append(item)
+    for bucket in buckets:
+        bucket["count"] = len(bucket["items"])
+    return buckets
+
+
+def _build_month_opportunities_summary(
+    month_label: str,
+    buckets: list[dict[str, Any]],
+    items: list[dict[str, Any]],
+    fallback: dict[str, Any] | None = None,
+) -> str:
+    active = [b for b in buckets if b["count"] > 0]
+    total = sum(b["count"] for b in buckets)
+    if not total:
+        if fallback and fallback.get("count"):
+            hint = (
+                f"下方展示同期 {fallback['count']} 条币圈相关报道供参考"
+                if fallback.get("scope") == "month"
+                else f"下方展示近 30 天 {fallback['count']} 条币圈相关报道供参考"
+            )
+            return f"{month_label}暂未识别到明确可参与机会，{hint}。"
+        return f"{month_label}暂未识别到明确可参与机会，可切换其他月份或稍后刷新。"
+    counts = "、".join(f"{b['label']} {b['count']} 条" for b in active)
+    top_items = [item["title"][:28] for item in items if item.get("highlight")][:2]
+    top = "、".join(top_items)
+    line = f"{month_label}共 {total} 条机会：{counts}。"
+    if top:
+        line += f"重点关注：{top}。"
+    line += "参与前请核实官方渠道、时间与资格要求，注意风险。"
+    return line
+
+
 def _to_crypto_opportunity(flash: dict[str, Any], kind: str, kind_label: str) -> dict[str, Any]:
     title = _flash_title_clean(flash["title"])
     body = re.sub(r"\s+", " ", flash.get("body") or "").strip()
     url = flash.get("url") or ""
+    month_key = _bj_month_key(flash.get("publishedAt"))
     row: dict[str, Any] = {
         "id": str(flash["id"]),
         "kind": kind,
         "kindLabel": kind_label,
         "title": title,
         "summary": body or title,
+        "date": _format_opportunity_date(flash.get("publishedAt")),
         "time": _format_flash_time_bj(flash.get("publishedAt")),
+        "monthKey": month_key,
         "sources": [_source(url, flash["title"])] if url else [],
     }
     highlight = _extract_opportunity_highlight(kind, flash["title"], body)
@@ -849,58 +970,113 @@ def _to_crypto_opportunity(flash: dict[str, Any], kind: str, kind_label: str) ->
     return row
 
 
-def _build_opportunities_summary(
-    buckets: list[dict[str, Any]],
-    highlights: list[dict[str, Any]],
-) -> str:
-    active = [b for b in buckets if b["count"] > 0]
-    if not active:
-        return "今日暂未从 Odaily 流中识别到明确可参与机会，建议稍后刷新或关注快讯中的融资 / TGE 动态。"
-    counts = "、".join(f"{b['label']} {b['count']} 条" for b in active)
-    top = "、".join(h["title"][:28] for h in highlights[:2])
-    line = f"今日已识别：{counts}。"
-    if top:
-        line += f"重点关注：{top}。"
-    line += "参与前请核实官方渠道、时间与资格要求，注意风险。"
-    return line
+def _is_crypto_related_item(flash: dict[str, Any]) -> bool:
+    title = _flash_title_clean(flash["title"])
+    if PLANET_DIGEST_RE.match(title):
+        return False
+    body = (flash.get("body") or "")[:240]
+    return _is_crypto(title) or _is_crypto(body)
+
+
+def _to_opportunity_fallback(flash: dict[str, Any]) -> dict[str, Any]:
+    title = _flash_title_clean(flash["title"])
+    body = re.sub(r"\s+", " ", flash.get("body") or "").strip()
+    url = flash.get("url") or ""
+    month_key = _bj_month_key(flash.get("publishedAt"))
+    row: dict[str, Any] = {
+        "id": str(flash["id"]),
+        "title": title,
+        "summary": body or title,
+        "date": _format_opportunity_date(flash.get("publishedAt")),
+        "time": _format_flash_time_bj(flash.get("publishedAt")),
+        "monthKey": month_key,
+        "sources": [_source(url, flash["title"])] if url else [],
+    }
+    verified = _verified_flash_url(url)
+    if verified:
+        row["url"] = verified
+    return row
+
+
+def _build_opportunity_fallback_items(
+    pool: list[dict[str, Any]],
+    opportunity_urls: set[str],
+    month_key: str | None,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for flash in pool:
+        url = flash.get("url") or ""
+        if not url or url in opportunity_urls:
+            continue
+        if not _is_crypto_related_item(flash):
+            continue
+        if month_key and _bj_month_key(flash.get("publishedAt")) != month_key:
+            continue
+        items.append(_to_opportunity_fallback(flash))
+        if len(items) >= limit:
+            break
+    return items
 
 
 def _build_crypto_opportunities(
     flashes: list[dict[str, Any]],
     posts: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    pool = _today_flash_pool(flashes) + posts[:25]
-    buckets = [{"id": k, "label": label, "count": 0, "items": []} for k, label in OPPORTUNITY_BUCKET_DEFS]
-    bucket_map = {bucket["id"]: bucket for bucket in buckets}
-    seen: set[str] = set()
-    all_items: list[dict[str, Any]] = []
+    pool = _recent_month_pool(flashes, posts, 30)
+    by_month: dict[str, list[dict[str, Any]]] = {}
+    opportunity_urls: set[str] = set()
 
     for flash in pool:
         url = flash.get("url") or ""
-        if not url or url in seen:
+        if not url or url in opportunity_urls:
             continue
         body = flash.get("body") or ""
         kind = _classify_opportunity_kind(flash["title"], body)
         if not kind:
             continue
-        seen.add(url)
+        opportunity_urls.add(url)
         label = next(l for k, l in OPPORTUNITY_BUCKET_DEFS if k == kind)
         item = _to_crypto_opportunity(flash, kind, label)
-        bucket_map[kind]["items"].append(item)
-        all_items.append(item)
+        by_month.setdefault(item["monthKey"], []).append(item)
 
-    for bucket in buckets:
-        bucket["count"] = len(bucket["items"])
+    recent_fallback = _build_opportunity_fallback_items(pool, opportunity_urls, None, 10)
+    current_key = _bj_month_key()
+    month_keys = sorted({current_key, *by_month.keys()}, reverse=True)
+    months = []
+    for key in month_keys:
+        items = by_month.get(key, [])
+        buckets = _build_opportunity_buckets(items)
+        label = _format_month_label(key)
+        month_fallback = _build_opportunity_fallback_items(pool, opportunity_urls, key, 10)
+        fallback_items = month_fallback if month_fallback else (recent_fallback if not items else [])
+        fallback_meta = None
+        if not items and fallback_items:
+            fallback_meta = {
+                "count": len(fallback_items),
+                "scope": "month" if month_fallback else "recent",
+            }
+        months.append(
+            {
+                "key": key,
+                "label": label,
+                "summary": _build_month_opportunities_summary(label, buckets, items, fallback_meta),
+                "totalCount": len(items),
+                "buckets": buckets,
+                "fallbackItems": fallback_items,
+                **({"fallbackScope": fallback_meta["scope"]} if fallback_meta else {}),
+            }
+        )
 
-    highlights = all_items[:6]
     date_label = _date_label()
     fetched_at = _now_bj().strftime(f"{date_label} %H:%M")
     return {
         "dateLabel": date_label,
         "updatedAt": fetched_at,
-        "summary": _build_opportunities_summary(buckets, highlights),
-        "buckets": buckets,
-        "highlights": highlights,
+        "rangeLabel": "近 30 天",
+        "defaultMonth": current_key,
+        "months": months,
+        "recentFallback": recent_fallback,
     }
 
 

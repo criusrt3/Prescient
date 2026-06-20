@@ -698,23 +698,39 @@ const OPPORTUNITY_BUCKET_DEFS: { id: OpportunityKind; label: string }[] = [
 
 function classifyOpportunityKind(title: string, body: string): OpportunityKind | null {
   if (isPlanetDigestTitle(title)) return null
-  const text = `${flashTitleClean(title)} ${body.slice(0, 400)}`
-  const rules: [OpportunityKind, RegExp][] = [
-    ['tge', /TGE|代币生成事件|公开发售|IDO|IEO|Launchpool|打新|预售|认购(?:开启|启动)|代币发行|新币上线/i],
-    ['airdrop', /空投(?:活动|申领|开启)?|申领资格|快照|空头代币|airdrop/i],
-    [
-      'lottery',
-      /抽奖|幸运(?:用户|大奖)|福利活动|转盘|Galxe|TaskOn|Zealy|积分兑换|领取(?:奖励|福利)|赠品/i,
-    ],
-    [
-      'fundraising',
-      /融资|领投|参投|估值达|募资|种子轮|A\s*轮融资|B\s*轮融资|战略投资|完成.*(?:万|亿)美元|获.*投资/i,
-    ],
-  ]
-  for (const [id, re] of rules) {
-    if (re.test(text)) return id
+  const t = flashTitleClean(title)
+  const snippet = body.slice(0, 400)
+  if (/TGE|代币生成事件|公开发售|IDO|IEO|Launchpool|打新|预售|认购(?:开启|启动)|代币发行|新币上线/i.test(`${t} ${snippet}`)) {
+    return 'tge'
   }
+  if (/空投(?:活动|申领|开启)?|申领资格|快照|空头代币|airdrop/i.test(`${t} ${snippet}`)) {
+    return 'airdrop'
+  }
+  if (/抽奖|幸运(?:用户|大奖)|福利活动|转盘|Galxe|TaskOn|Zealy|积分兑换|领取(?:奖励|福利)|赠品/i.test(`${t} ${snippet}`)) {
+    return 'lottery'
+  }
+  if (isFundraisingOpportunity(t, snippet)) return 'fundraising'
   return null
+}
+
+function isFundraisingOpportunity(title: string, body: string): boolean {
+  const text = `${title} ${body}`
+  if (
+    /投研|研报|研究报告|会重演|流动性正在|看跌|看多|观点：|警告|预测|创始人：|CEO：|分析师|主席：|董事长：/i.test(
+      title,
+    ) &&
+    !/(?:完成|获|宣布|领投|估值达).{0,20}(?:融资|亿美元|万美元)|种子轮|A\s*轮融资|B\s*轮融资/i.test(
+      title,
+    )
+  ) {
+    return false
+  }
+  if (/融资市场|证券融资|链上证券/i.test(title) && !/(?:完成|获|宣布|领投|种子轮|A\s*轮)/i.test(title)) {
+    return false
+  }
+  return /(?:完成|获|宣布|筹集).{0,12}(?:融资|投资)|领投|参投|估值达|募资|种子轮|A\s*轮融资|B\s*轮融资|战略投资|完成\s*\d+(?:\.\d+)?(?:万|亿)?美元/i.test(
+    text,
+  )
 }
 
 function extractOpportunityHighlight(kind: OpportunityKind, title: string, body: string): string | undefined {
@@ -726,7 +742,7 @@ function extractOpportunityHighlight(kind: OpportunityKind, title: string, body:
     const round = text.match(/(种子轮|Pre-Seed|A\s*轮|B\s*轮|C\s*轮|战略投资)/i)
     if (amt) return amt[0].replace(/\s+/g, ' ').slice(0, 42)
     if (round) return round[0]
-    return '融资动态'
+    return undefined
   }
   if (kind === 'tge') {
     const m = text.match(/(TGE|IDO|IEO|Launchpool|打新|预售)/i)
@@ -748,12 +764,15 @@ function toCryptoOpportunity(
   title: string
   summary: string
   highlight?: string
+  date: string
   time: string
+  monthKey: string
   url?: string
   sources: { name: string; url: string }[]
 } {
   const title = flashTitleClean(f.title)
   const body = (f.body ?? '').replace(/\s+/g, ' ').trim()
+  const monthKey = bjMonthKey(f.publishedAt)
   return {
     id: f.id,
     kind,
@@ -761,33 +780,68 @@ function toCryptoOpportunity(
     title,
     summary: body || title,
     highlight: extractOpportunityHighlight(kind, f.title, body),
+    date: formatOpportunityDate(f.publishedAt),
     time: formatFlashTimeBj(f.publishedAt),
+    monthKey,
     url: verifiedFlashUrl(f.url),
     sources: sourceFromItem(f),
   }
 }
 
-function buildOpportunitiesSummary(
-  buckets: { label: string; count: number }[],
-  highlights: { title: string }[],
-): string {
-  const active = buckets.filter((b) => b.count > 0)
-  if (!active.length) {
-    return '今日暂未从 Odaily 流中识别到明确可参与机会，建议稍后刷新或关注快讯中的融资 / TGE 动态。'
-  }
-  const counts = active.map((b) => `${b.label} ${b.count} 条`).join('、')
-  const top = highlights
-    .slice(0, 2)
-    .map((h) => h.title.slice(0, 28))
-    .join('、')
-  let line = `今日已识别：${counts}。`
-  if (top) line += `重点关注：${top}。`
-  line += '参与前请核实官方渠道、时间与资格要求，注意风险。'
-  return line
+function bjMonthKey(iso?: string): string {
+  const target = iso ? new Date(iso) : new Date()
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(target)
+  const year = parts.find((p) => p.type === 'year')?.value ?? '2026'
+  const month = parts.find((p) => p.type === 'month')?.value ?? '01'
+  return `${year}-${month}`
 }
 
-function buildCryptoOpportunities(flashes: RssItem[], posts: RssItem[]) {
-  const pool = [...todayFlashPool(flashes), ...posts.slice(0, 25)]
+function formatMonthLabel(monthKey: string): string {
+  const [year, month] = monthKey.split('-')
+  return `${year}年${month}月`
+}
+
+function formatOpportunityDate(iso?: string): string {
+  if (!iso) return '--'
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(iso))
+}
+
+function isWithinLastDays(iso: string | undefined, days: number): boolean {
+  if (!iso) return false
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000
+  return new Date(iso).getTime() >= cutoff
+}
+
+function recentMonthPool(flashes: RssItem[], posts: RssItem[], days = 30): RssItem[] {
+  const seen = new Set<string>()
+  const out: RssItem[] = []
+  for (const f of [...flashes, ...posts]) {
+    if (!f.url || seen.has(f.url)) continue
+    if (!isWithinLastDays(f.publishedAt, days)) continue
+    seen.add(f.url)
+    out.push(f)
+  }
+  return out.sort((a, b) => {
+    const at = a.publishedAt ? new Date(a.publishedAt).getTime() : 0
+    const bt = b.publishedAt ? new Date(b.publishedAt).getTime() : 0
+    return bt - at
+  })
+}
+
+function buildOpportunityBuckets(
+  items: ReturnType<typeof toCryptoOpportunity>[],
+): { id: OpportunityKind; label: string; count: number; items: ReturnType<typeof toCryptoOpportunity>[] }[] {
   const buckets = OPPORTUNITY_BUCKET_DEFS.map(({ id, label }) => ({
     id,
     label,
@@ -795,34 +849,150 @@ function buildCryptoOpportunities(flashes: RssItem[], posts: RssItem[]) {
     items: [] as ReturnType<typeof toCryptoOpportunity>[],
   }))
   const bucketMap = new Map(buckets.map((b) => [b.id, b]))
-  const seen = new Set<string>()
-  const allItems: ReturnType<typeof toCryptoOpportunity>[] = []
-
-  for (const f of pool) {
-    if (!f.url || seen.has(f.url)) continue
-    const kind = classifyOpportunityKind(f.title, f.body ?? '')
-    if (!kind) continue
-    seen.add(f.url)
-    const def = OPPORTUNITY_BUCKET_DEFS.find((d) => d.id === kind)!
-    const item = toCryptoOpportunity(f, kind, def.label)
-    const bucket = bucketMap.get(kind)!
-    bucket.items.push(item)
-    allItems.push(item)
+  for (const item of items) {
+    bucketMap.get(item.kind)!.items.push(item)
   }
-
   for (const bucket of buckets) {
     bucket.count = bucket.items.length
   }
+  return buckets
+}
 
-  const highlights = allItems.slice(0, 6)
+function isCryptoRelatedItem(f: RssItem): boolean {
+  const title = flashTitleClean(f.title)
+  if (isPlanetDigestTitle(f.title)) return false
+  const body = (f.body ?? '').slice(0, 240)
+  return isCrypto(title) || isCrypto(body)
+}
+
+function toOpportunityFallback(f: RssItem): {
+  id: string
+  title: string
+  summary: string
+  date: string
+  time: string
+  monthKey: string
+  url?: string
+  sources: { name: string; url: string }[]
+} {
+  const title = flashTitleClean(f.title)
+  const body = (f.body ?? '').replace(/\s+/g, ' ').trim()
+  const monthKey = bjMonthKey(f.publishedAt)
+  return {
+    id: f.id,
+    title,
+    summary: body || title,
+    date: formatOpportunityDate(f.publishedAt),
+    time: formatFlashTimeBj(f.publishedAt),
+    monthKey,
+    url: verifiedFlashUrl(f.url),
+    sources: sourceFromItem(f),
+  }
+}
+
+function buildOpportunityFallbackItems(
+  pool: RssItem[],
+  opportunityUrls: Set<string>,
+  monthKey: string | null,
+  limit = 10,
+): ReturnType<typeof toOpportunityFallback>[] {
+  const items: ReturnType<typeof toOpportunityFallback>[] = []
+  for (const f of pool) {
+    if (!f.url || opportunityUrls.has(f.url)) continue
+    if (!isCryptoRelatedItem(f)) continue
+    if (monthKey && bjMonthKey(f.publishedAt) !== monthKey) continue
+    items.push(toOpportunityFallback(f))
+    if (items.length >= limit) break
+  }
+  return items
+}
+
+function buildMonthOpportunitiesSummary(
+  monthLabel: string,
+  buckets: { label: string; count: number }[],
+  items: { title: string; highlight?: string }[],
+  fallback: { count: number; scope: 'month' | 'recent' } | null = null,
+): string {
+  const active = buckets.filter((b) => b.count > 0)
+  const total = buckets.reduce((sum, b) => sum + b.count, 0)
+  if (!total) {
+    if (fallback?.count) {
+      const hint =
+        fallback.scope === 'month'
+          ? `下方展示同期 ${fallback.count} 条币圈相关报道供参考`
+          : `下方展示近 30 天 ${fallback.count} 条币圈相关报道供参考`
+      return `${monthLabel}暂未识别到明确可参与机会，${hint}。`
+    }
+    return `${monthLabel}暂未识别到明确可参与机会，可切换其他月份或稍后刷新。`
+  }
+  const counts = active.map((b) => `${b.label} ${b.count} 条`).join('、')
+  const top = items
+    .filter((i) => i.highlight)
+    .slice(0, 2)
+    .map((i) => i.title.slice(0, 28))
+    .join('、')
+  let line = `${monthLabel}共 ${total} 条机会：${counts}。`
+  if (top) line += `重点关注：${top}。`
+  line += '参与前请核实官方渠道、时间与资格要求，注意风险。'
+  return line
+}
+
+function buildCryptoOpportunities(flashes: RssItem[], posts: RssItem[]) {
+  const pool = recentMonthPool(flashes, posts, 30)
+  const byMonth = new Map<string, ReturnType<typeof toCryptoOpportunity>[]>()
+  const opportunityUrls = new Set<string>()
+
+  for (const f of pool) {
+    if (!f.url || opportunityUrls.has(f.url)) continue
+    const kind = classifyOpportunityKind(f.title, f.body ?? '')
+    if (!kind) continue
+    opportunityUrls.add(f.url)
+    const def = OPPORTUNITY_BUCKET_DEFS.find((d) => d.id === kind)!
+    const item = toCryptoOpportunity(f, kind, def.label)
+    const monthKey = item.monthKey
+    const list = byMonth.get(monthKey) ?? []
+    list.push(item)
+    byMonth.set(monthKey, list)
+  }
+
+  const recentFallback = buildOpportunityFallbackItems(pool, opportunityUrls, null, 10)
+  const currentKey = bjMonthKey()
+  const monthKeys = [...new Set([currentKey, ...byMonth.keys()])].sort((a, b) => b.localeCompare(a))
+
+  const months = monthKeys.map((key) => {
+    const items = byMonth.get(key) ?? []
+    const buckets = buildOpportunityBuckets(items)
+    const label = formatMonthLabel(key)
+    const monthFallback = buildOpportunityFallbackItems(pool, opportunityUrls, key, 10)
+    const fallbackItems =
+      monthFallback.length > 0 ? monthFallback : items.length === 0 ? recentFallback : []
+    const fallbackMeta =
+      items.length === 0 && fallbackItems.length > 0
+        ? {
+            count: fallbackItems.length,
+            scope: (monthFallback.length > 0 ? 'month' : 'recent') as 'month' | 'recent',
+          }
+        : null
+    return {
+      key,
+      label,
+      summary: buildMonthOpportunitiesSummary(label, buckets, items, fallbackMeta),
+      totalCount: items.length,
+      buckets,
+      fallbackItems,
+      ...(fallbackMeta ? { fallbackScope: fallbackMeta.scope } : {}),
+    }
+  })
+
   const clock = bjClock()
 
   return {
     dateLabel: bjDateLabel(),
     updatedAt: `${bjDateLabel()} ${String(clock.hour).padStart(2, '0')}:${String(clock.minute).padStart(2, '0')}`,
-    summary: buildOpportunitiesSummary(buckets, highlights),
-    buckets,
-    highlights,
+    rangeLabel: '近 30 天',
+    defaultMonth: currentKey,
+    months,
+    recentFallback,
   }
 }
 

@@ -1,14 +1,30 @@
 import type { PrescientData } from './types'
 import { buildDigestFallback, buildDigestLoading } from './digestEngine'
-import { emptyOpportunityBuckets } from './types'
+import { emptyOpportunityMonth } from './types'
 
-const emptyOpportunities = () => ({
-  dateLabel: '—',
-  updatedAt: '—',
-  summary: '正在加载币圈机会…',
-  buckets: emptyOpportunityBuckets(),
-  highlights: [],
-})
+function currentMonthKey(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(new Date())
+  const year = parts.find((p) => p.type === 'year')?.value ?? '2026'
+  const month = parts.find((p) => p.type === 'month')?.value ?? '01'
+  return `${year}-${month}`
+}
+
+const emptyOpportunities = () => {
+  const key = currentMonthKey()
+  const label = `${key.slice(0, 4)}年${key.slice(5)}月`
+  return {
+    dateLabel: '—',
+    updatedAt: '—',
+    rangeLabel: '近 30 天',
+    defaultMonth: key,
+    months: [emptyOpportunityMonth(key, label)],
+    recentFallback: [],
+  }
+}
 
 export function buildDataLoading(): PrescientData {
   const digest = buildDigestLoading()
@@ -69,9 +85,18 @@ export function buildDataFallback(error: string): PrescientData {
     opportunities: {
       dateLabel: '—',
       updatedAt: '—',
-      summary: `数据不可用：${error}`,
-      buckets: emptyOpportunityBuckets(),
-      highlights: [],
+      rangeLabel: '近 30 天',
+      defaultMonth: currentMonthKey(),
+      months: [
+        {
+          ...emptyOpportunityMonth(
+            currentMonthKey(),
+            `${currentMonthKey().slice(0, 4)}年${currentMonthKey().slice(5)}月`,
+          ),
+          summary: `数据不可用：${error}`,
+        },
+      ],
+      recentFallback: [],
     },
     raw: {
       articles: [],

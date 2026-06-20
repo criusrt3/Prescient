@@ -16,6 +16,7 @@ import {
   type SignalLevel,
   type ConsensusStage,
   type CryptoOpportunity,
+  type OpportunityFallbackItem,
   type NewsSource,
   type ThemeMode,
 } from './types'
@@ -50,6 +51,7 @@ export function mountApp(root: HTMLElement) {
   let digestTimer: ReturnType<typeof setTimeout> | null = null
   let digestTab: 'hourly' | 'crypto' = 'hourly'
   let digestFlashCategory: string | null = null
+  let opportunityMonth: string | null = null
   let dataRefreshing = false
 
   const refreshAllData = async () => {
@@ -543,7 +545,7 @@ export function mountApp(root: HTMLElement) {
       <article class="opp-card ${style.cls}">
         <div class="opp-card-head">
           <span class="opp-kind">${style.emoji} ${escapeHtml(item.kindLabel)}</span>
-          <span class="opp-time">${escapeHtml(item.time)}</span>
+          <span class="opp-time">${escapeHtml(item.date)}</span>
         </div>
         <h4 class="opp-title">${titleHtml}</h4>
         ${item.highlight ? `<p class="opp-highlight">${escapeHtml(item.highlight)}</p>` : ''}
@@ -553,29 +555,64 @@ export function mountApp(root: HTMLElement) {
     `
   }
 
+  const renderOpportunityFallbackCard = (item: OpportunityFallbackItem) => {
+    const titleHtml =
+      item.url && isVerifiedSourceUrl(item.url)
+        ? `<a class="opp-title-link" href="${item.url}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a>`
+        : escapeHtml(item.title)
+    return `
+      <article class="opp-card opp-fallback">
+        <div class="opp-card-head">
+          <span class="opp-kind">📰 近期动态</span>
+          <span class="opp-time">${escapeHtml(item.date)}</span>
+        </div>
+        <h4 class="opp-title">${titleHtml}</h4>
+        <p class="opp-summary">${escapeHtml(item.summary.slice(0, 140))}${item.summary.length > 140 ? '…' : ''}</p>
+        ${renderSourceActions(item.sources, { compact: true })}
+      </article>
+    `
+  }
+
   const renderM6 = (d: PrescientData) => {
     const opp = d.opportunities
-    const activeBuckets = opp.buckets.filter((b) => b.count > 0)
+    const monthKey = opportunityMonth ?? opp.defaultMonth
+    const slice = opp.months.find((m) => m.key === monthKey) ?? opp.months[0]
+    const activeBuckets = slice?.buckets.filter((b) => b.count > 0) ?? []
+    const fallbackItems = slice?.fallbackItems ?? []
+    const fallbackScope = slice?.fallbackScope ?? null
+
+    const monthNav = `
+      <nav class="opp-month-nav" aria-label="按月筛选">
+        ${opp.months
+          .map(
+            (m) => `
+          <button
+            type="button"
+            class="opp-month-btn ${monthKey === m.key ? 'active' : ''}"
+            data-opp-month="${m.key}"
+          >
+            ${escapeHtml(m.label)}
+            <span class="opp-month-count">${m.totalCount}</span>
+          </button>
+        `,
+          )
+          .join('')}
+      </nav>
+    `
+
     return `
     <section class="panel">
       <div class="panel-head">
         <h2>🎯 币圈机会</h2>
         <span class="divider-line"></span>
-        <p class="panel-desc">项目融资、TGE / 发售、空投与抽奖等可参与机会汇总</p>
+        <p class="panel-desc">项目融资、TGE / 发售、空投与抽奖等可参与机会汇总（${escapeHtml(opp.rangeLabel)}）</p>
       </div>
+      ${monthNav}
       <div class="ai-box tip">
         <strong>📋 参与机会摘要</strong>
-        <p>${escapeHtml(opp.summary)}</p>
-        <p class="opp-meta muted">更新 ${escapeHtml(opp.updatedAt)} · 数据来自 Odaily，参与前请核实官方信息</p>
+        <p>${escapeHtml(slice?.summary ?? '暂无数据')}</p>
+        <p class="opp-meta muted">更新 ${escapeHtml(opp.updatedAt)} · 数据来自 Odaily · ${escapeHtml(opp.rangeLabel)}，参与前请核实官方信息</p>
       </div>
-      ${
-        opp.highlights.length
-          ? `
-        <h3 class="opp-section-title">⭐ 今日值得关注</h3>
-        <div class="opp-grid">${opp.highlights.map((item) => renderOpportunityCard(item)).join('')}</div>
-      `
-          : ''
-      }
       ${
         activeBuckets.length
           ? activeBuckets
@@ -589,7 +626,16 @@ export function mountApp(root: HTMLElement) {
         `,
               )
               .join('')
-          : '<p class="muted">今日暂未识别到明确参与机会，请稍后刷新。</p>'
+          : fallbackItems.length
+            ? `
+          <p class="muted opp-empty-hint">该月份暂未识别到明确参与机会（TGE / 空投 / 抽奖 / 融资）。</p>
+          <h3 class="opp-section-title opp-fallback-title">
+            ${fallbackScope === 'month' ? '同期币圈动态' : '近 30 天币圈动态'}
+            <span class="opp-count">${fallbackItems.length}</span>
+          </h3>
+          <div class="opp-grid">${fallbackItems.map((item) => renderOpportunityFallbackCard(item)).join('')}</div>
+        `
+            : '<p class="muted">该月份暂未识别到明确参与机会，请切换其他月份或稍后刷新。</p>'
       }
     </section>
   `
@@ -826,6 +872,13 @@ export function mountApp(root: HTMLElement) {
       el.addEventListener('click', () => {
         const id = (el as HTMLElement).dataset.flashCat
         digestFlashCategory = id === 'all' ? null : (id ?? null)
+        render()
+      })
+    })
+
+    root.querySelectorAll('[data-opp-month]').forEach((el) => {
+      el.addEventListener('click', () => {
+        opportunityMonth = (el as HTMLElement).dataset.oppMonth ?? null
         render()
       })
     })

@@ -1298,6 +1298,53 @@ body {
   font-size: 0.78rem;
 }
 
+.opp-month-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.opp-month-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.opp-month-btn:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.opp-month-btn.active {
+  color: var(--opt);
+  border-color: var(--opt);
+  background: color-mix(in srgb, var(--opt) 12%, transparent);
+}
+
+.opp-month-count {
+  min-width: 1.2em;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 18%, transparent);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.opp-month-btn.active .opp-month-count {
+  background: color-mix(in srgb, var(--opt) 22%, transparent);
+}
+
 .opp-section-title {
   margin: 28px 0 14px;
   font-size: 0.95rem;
@@ -1344,6 +1391,19 @@ body {
 
 .opp-card.opp-airdrop {
   border-left-color: #6bcb77;
+}
+
+.opp-card.opp-fallback {
+  border-left-color: var(--text-dim);
+  opacity: 0.92;
+}
+
+.opp-empty-hint {
+  margin: 0 0 16px;
+}
+
+.opp-fallback-title {
+  margin-top: 4px;
 }
 
 .opp-card-head {

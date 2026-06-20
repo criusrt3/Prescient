@@ -200,7 +200,7 @@ function buildDisputes(
     if (!main) continue
     const body = main.body || main.title
     const src = sourceFromItem(main)[0]
-    const relatedFlashes = pickDisputeRelatedFlashes(main, relatedPool, todayFlashes)
+    const relatedFlashes = pickDisputeRelatedFlashes(main, relatedPool, flashes, re, topic.name)
     disputes.push({
       id: `d${i + 1}`,
       name: topic.name,
@@ -237,7 +237,7 @@ function buildDisputes(
     const f = flashes[0]
     const body = f.body || f.title
     const src = sourceFromItem(f)[0]
-    const relatedFlashes = pickDisputeRelatedFlashes(f, todayFlashes, todayFlashes)
+    const relatedFlashes = pickDisputeRelatedFlashes(f, [f], flashes)
     disputes.push({
       id: 'd1',
       name: f.title.length > 28 ? `${f.title.slice(0, 28)}…` : f.title,
@@ -334,9 +334,9 @@ function buildCooling(
 }
 
 function sourceFromItem(item?: { title: string; url: string }): { name: string; url: string }[] {
-  if (!item?.url) return []
-  const name = item.title.length > 36 ? `${item.title.slice(0, 36)}…` : item.title
-  return [{ name, url: item.url }]
+  const url = normalizeOdailyItemUrl(item?.url)
+  if (!url) return []
+  return [{ name: 'Odaily 原文', url }]
 }
 
 interface RssItem {
@@ -476,8 +476,21 @@ function toDigestItem(f: RssItem): { id: string; text: string; url?: string } {
   return url ? { id: f.id, text, url } : { id: f.id, text }
 }
 
+function normalizeOdailyItemUrl(url?: string): string | undefined {
+  if (!url) return undefined
+  try {
+    const u = new URL(url.trim())
+    if (!/odaily\.news$/i.test(u.hostname)) return undefined
+    const m = u.pathname.match(/\/zh-CN\/(post|newsflash)\/(\d+)/)
+    if (!m) return undefined
+    return `https://www.odaily.news/zh-CN/${m[1]}/${m[2]}`
+  } catch {
+    return undefined
+  }
+}
+
 function verifiedFlashUrl(url: string): string | undefined {
-  return ODAILY_ITEM_URL_RE.test(url) ? url : undefined
+  return normalizeOdailyItemUrl(url)
 }
 
 function formatFlashTimeBj(iso?: string): string {
@@ -505,37 +518,93 @@ function toDisputeRelatedFlash(f: RssItem) {
   }
 }
 
+const DISPUTE_STOP_WORDS = new Set([
+  '表示',
+  '称',
+  '认为',
+  '据悉',
+  '报道',
+  '消息',
+  '快讯',
+  '星球',
+  'Odaily',
+  '日报',
+  '今日',
+  '昨日',
+  '或将',
+  '可能',
+  '相关',
+  '市场',
+  '数据',
+])
+
+function disputeKeywordTokens(text: string): Set<string> {
+  const cleaned = flashTitleClean(text)
+  const tokens = cleaned.match(/[\u4e00-\u9fff]{2,}|[A-Za-z]{2,}|\d+/g) ?? []
+  return new Set(tokens.filter((t) => !DISPUTE_STOP_WORDS.has(t) && t.length >= 2))
+}
+
+function disputeRelatedScore(
+  main: RssItem,
+  candidate: RssItem,
+  topicRe?: RegExp,
+  topicName?: string,
+): number {
+  const text = `${candidate.title} ${candidate.body ?? ''}`
+  if (isPlanetDigestTitle(candidate.title)) return 0
+
+  let score = 0
+  if (topicRe?.test(text)) score += 4
+
+  const mainTokens = disputeKeywordTokens(`${main.title} ${topicName ?? ''}`)
+  for (const token of mainTokens) {
+    if (text.includes(token)) score += token.length >= 4 ? 2 : 1
+  }
+
+  return score
+}
+
 function pickDisputeRelatedFlashes(
   main: RssItem,
   topicRelated: RssItem[],
-  todayFlashes: RssItem[],
+  allFlashes: RssItem[],
+  topicRe?: RegExp,
+  topicName?: string,
   limit = 5,
 ) {
-  const seen = new Set<string>([main.url])
-  let pool = topicRelated.filter((f) => f.url !== main.url)
+  const mainUrl = main.url
+  const seen = new Set<string>(mainUrl ? [mainUrl] : [])
 
-  if (pool.length < 3) {
-    const mainTs = main.publishedAt ? new Date(main.publishedAt).getTime() : 0
-    const windowMs = 3 * 60 * 60 * 1000
-    for (const f of todayFlashes) {
-      if (!f.url || seen.has(f.url) || f.url === main.url) continue
-      if (!mainTs || !f.publishedAt) continue
-      const delta = Math.abs(new Date(f.publishedAt).getTime() - mainTs)
-      if (delta <= windowMs) pool.push(f)
+  let pool = topicRelated.filter(
+    (f) => f.url && f.url !== mainUrl && !isPlanetDigestTitle(f.title),
+  )
+
+  const poolSeen = new Set<string>(seen)
+  pool = pool.filter((f) => {
+    if (!f.url || poolSeen.has(f.url)) return false
+    poolSeen.add(f.url)
+    return true
+  })
+
+  if (pool.length < limit && topicRe) {
+    for (const f of allFlashes) {
+      if (!f.url || poolSeen.has(f.url) || f.url === mainUrl) continue
+      if (isPlanetDigestTitle(f.title)) continue
+      if (!topicRe.test(`${f.title} ${f.body ?? ''}`)) continue
+      pool.push(f)
+      poolSeen.add(f.url)
     }
   }
 
-  const unique: RssItem[] = []
-  for (const f of pool) {
-    if (!f.url || seen.has(f.url)) continue
-    seen.add(f.url)
-    unique.push(f)
-  }
+  const minScore = topicRe ? 3 : 2
+  const scored = pool
+    .map((f) => ({ f, score: disputeRelatedScore(main, f, topicRe, topicName) }))
+    .filter((x) => x.score >= minScore)
+    .sort(
+      (a, b) => b.score - a.score || flashTimeDeltaMs(main, a.f) - flashTimeDeltaMs(main, b.f),
+    )
 
-  return unique
-    .sort((a, b) => flashTimeDeltaMs(main, a) - flashTimeDeltaMs(main, b))
-    .slice(0, limit)
-    .map((f) => toDisputeRelatedFlash(f))
+  return scored.slice(0, limit).map((x) => toDisputeRelatedFlash(x.f))
 }
 
 function todayFlashPool(flashes: RssItem[]): RssItem[] {

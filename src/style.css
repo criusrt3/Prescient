@@ -1543,6 +1543,20 @@ body {
   line-height: 1.55;
 }
 
+.opp-source-link {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--opt);
+  text-decoration: none;
+}
+
+.opp-source-link:hover {
+  text-decoration: underline;
+}
+
 /* AI box */
 .ai-box {
   background: rgba(201, 162, 39, 0.08);

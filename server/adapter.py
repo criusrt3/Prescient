@@ -169,11 +169,14 @@ def _is_today(iso: str | None) -> bool:
     return bool(iso and iso.startswith(_now_bj().strftime("%Y-%m-%d")))
 
 
-def _source(url: str, title: str = "") -> dict[str, str]:
+def _source(url: str, title: str = "", *, label: str | None = None) -> dict[str, str]:
+    normalized = _normalize_odaily_url(url)
+    if normalized:
+        return {"name": label or "Odaily 原文", "url": normalized}
     if not url:
-        return {"name": "Odaily"}
-    label = (title[:36] + "…") if len(title) > 36 else title
-    return {"name": label or "Odaily", "url": url}
+        return {"name": "Odaily", "url": ""}
+    name = (title[:36] + "…") if len(title) > 36 else title
+    return {"name": label or name or "Odaily", "url": url}
 
 
 def _flash_text(title: str) -> str:
@@ -182,6 +185,21 @@ def _flash_text(title: str) -> str:
 
 
 ODAILY_ITEM_URL_RE = re.compile(r"^https://www\.odaily\.news/zh-CN/(post|newsflash)/\d+$")
+ODAILY_ITEM_PATH_RE = re.compile(r"/zh-CN/(post|newsflash)/(\d+)")
+
+DISPUTE_STOP_WORDS = {
+    "表示", "称", "认为", "据悉", "报道", "消息", "快讯", "星球", "Odaily", "日报",
+    "今日", "昨日", "或将", "可能", "相关", "市场", "数据",
+}
+
+
+def _normalize_odaily_url(url: str) -> str | None:
+    if not url or "odaily.news" not in url:
+        return None
+    m = ODAILY_ITEM_PATH_RE.search(url.strip())
+    if not m:
+        return None
+    return f"https://www.odaily.news/zh-CN/{m.group(1)}/{m.group(2)}"
 
 
 def _to_digest_item(flash: dict[str, Any]) -> dict[str, Any]:
@@ -191,13 +209,14 @@ def _to_digest_item(flash: dict[str, Any]) -> dict[str, Any]:
         "text": _flash_text(title),
     }
     url = flash.get("url") or ""
-    if ODAILY_ITEM_URL_RE.match(url):
-        item["url"] = url
+    normalized = _normalize_odaily_url(url)
+    if normalized:
+        item["url"] = normalized
     return item
 
 
 def _verified_flash_url(url: str) -> str | None:
-    return url if ODAILY_ITEM_URL_RE.match(url) else None
+    return _normalize_odaily_url(url)
 
 
 def _format_flash_time_bj(iso: str | None) -> str:
@@ -237,51 +256,80 @@ def _to_dispute_related_flash(flash: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+def _dispute_keyword_tokens(text: str) -> set[str]:
+    cleaned = _flash_title_clean(text)
+    tokens = re.findall(r"[\u4e00-\u9fff]{2,}|[A-Za-z]{2,}|\d+", cleaned)
+    return {t for t in tokens if t not in DISPUTE_STOP_WORDS and len(t) >= 2}
+
+
+def _dispute_related_score(
+    main: dict[str, Any],
+    candidate: dict[str, Any],
+    topic_pattern: re.Pattern[str] | None = None,
+    topic_name: str | None = None,
+) -> int:
+    title = candidate.get("title") or ""
+    if PLANET_DIGEST_RE.match(_flash_title_clean(title)):
+        return 0
+    text = f"{title} {candidate.get('body') or ''}"
+    score = 0
+    if topic_pattern and topic_pattern.search(text):
+        score += 4
+    main_tokens = _dispute_keyword_tokens(f"{main.get('title') or ''} {topic_name or ''}")
+    for token in main_tokens:
+        if token in text:
+            score += 2 if len(token) >= 4 else 1
+    return score
+
+
 def _pick_dispute_related_flashes(
     main: dict[str, Any],
     topic_related: list[dict[str, Any]],
-    today_flashes: list[dict[str, Any]],
+    all_flashes: list[dict[str, Any]],
+    topic_pattern: re.Pattern[str] | None = None,
+    topic_name: str | None = None,
     limit: int = 5,
 ) -> list[dict[str, Any]]:
     main_url = main.get("url") or ""
     seen = {main_url} if main_url else set()
-    pool = [f for f in topic_related if f.get("url") and f.get("url") != main_url]
-
-    if len(pool) < 3:
-        main_iso = main.get("publishedAt")
-        if main_iso:
-            try:
-                main_ts = datetime.fromisoformat(main_iso).timestamp()
-            except ValueError:
-                main_ts = None
-        else:
-            main_ts = None
-        if main_ts is not None:
-            window = 3 * 60 * 60
-            for flash in today_flashes:
-                url = flash.get("url") or ""
-                if not url or url in seen or url == main_url:
-                    continue
-                iso = flash.get("publishedAt")
-                if not iso:
-                    continue
-                try:
-                    delta = abs(datetime.fromisoformat(iso).timestamp() - main_ts)
-                except ValueError:
-                    continue
-                if delta <= window:
-                    pool.append(flash)
-
-    unique: list[dict[str, Any]] = []
+    pool = [
+        f
+        for f in topic_related
+        if f.get("url")
+        and f.get("url") != main_url
+        and not PLANET_DIGEST_RE.match(_flash_title_clean(f.get("title") or ""))
+    ]
+    pool_seen = set(seen)
+    deduped_pool: list[dict[str, Any]] = []
     for flash in pool:
         url = flash.get("url") or ""
-        if not url or url in seen:
+        if not url or url in pool_seen:
             continue
-        seen.add(url)
-        unique.append(flash)
+        pool_seen.add(url)
+        deduped_pool.append(flash)
+    pool = deduped_pool
 
-    unique.sort(key=lambda f: _flash_time_delta_ms(main, f))
-    return [_to_dispute_related_flash(f) for f in unique[:limit]]
+    if len(pool) < limit and topic_pattern is not None:
+        for flash in all_flashes:
+            url = flash.get("url") or ""
+            if not url or url in pool_seen or url == main_url:
+                continue
+            if PLANET_DIGEST_RE.match(_flash_title_clean(flash.get("title") or "")):
+                continue
+            text = f"{flash.get('title') or ''} {flash.get('body') or ''}"
+            if not topic_pattern.search(text):
+                continue
+            pool.append(flash)
+            pool_seen.add(url)
+
+    min_score = 3 if topic_pattern is not None else 2
+    scored = [
+        (flash, _dispute_related_score(main, flash, topic_pattern, topic_name))
+        for flash in pool
+    ]
+    scored = [(flash, score) for flash, score in scored if score >= min_score]
+    scored.sort(key=lambda row: (-row[1], _flash_time_delta_ms(main, row[0])))
+    return [_to_dispute_related_flash(flash) for flash, _ in scored[:limit]]
 
 
 def _classify_level(title: str) -> str:
@@ -570,7 +618,9 @@ def _build_disputes(
                 "name": name,
                 "score": topic["heat"],
                 "sources": [src] if src else [],
-                "relatedFlashes": _pick_dispute_related_flashes(candidate, related_pool, today_flashes),
+                "relatedFlashes": _pick_dispute_related_flashes(
+                    candidate, related_pool, flashes, pattern, name
+                ),
                 "camps": [
                     {
                         "side": "optimistic",
@@ -614,7 +664,7 @@ def _build_disputes(
             "name": f"{title[:28]}…" if len(title) > 28 else title,
             "score": 68,
             "sources": [src] if src else [],
-            "relatedFlashes": _pick_dispute_related_flashes(candidate, today_flashes, today_flashes),
+            "relatedFlashes": _pick_dispute_related_flashes(candidate, [candidate], flashes),
             "camps": [
                 {
                     "side": "optimistic",
@@ -960,7 +1010,7 @@ def _to_crypto_opportunity(flash: dict[str, Any], kind: str, kind_label: str) ->
         "date": _format_opportunity_date(flash.get("publishedAt")),
         "time": _format_flash_time_bj(flash.get("publishedAt")),
         "monthKey": month_key,
-        "sources": [_source(url, flash["title"])] if url else [],
+        "sources": [_source(url, flash["title"], label="Odaily 原文")] if _normalize_odaily_url(url) else [],
     }
     highlight = _extract_opportunity_highlight(kind, flash["title"], body)
     if highlight:
@@ -991,7 +1041,7 @@ def _to_opportunity_fallback(flash: dict[str, Any]) -> dict[str, Any]:
         "date": _format_opportunity_date(flash.get("publishedAt")),
         "time": _format_flash_time_bj(flash.get("publishedAt")),
         "monthKey": month_key,
-        "sources": [_source(url, flash["title"])] if url else [],
+        "sources": [_source(url, flash["title"], label="Odaily 原文")] if _normalize_odaily_url(url) else [],
     }
     verified = _verified_flash_url(url)
     if verified:

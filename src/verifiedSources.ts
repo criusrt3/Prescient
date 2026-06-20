@@ -85,11 +85,29 @@ export function isPlanetDigestTitle(title: string): boolean {
   return PLANET_DIGEST_RE.test(title.replace(/^【快讯】\s*/, '').trim())
 }
 
+export function normalizeOdailyItemUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined
+  try {
+    const u = new URL(url.trim())
+    if (!/odaily\.news$/i.test(u.hostname)) return undefined
+    const m = u.pathname.match(/\/zh-CN\/(post|newsflash)\/(\d+)/)
+    if (!m) return undefined
+    return `https://www.odaily.news/zh-CN/${m[1]}/${m[2]}`
+  } catch {
+    return undefined
+  }
+}
+
+/** 解析为可跳转的来源 URL（Odaily 文章/快讯或已核实文档） */
+export function resolveSourceUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined
+  if (ODAILY_URLS.has(url) || VERIFIED_DOCUMENT_URLS.has(url)) return url
+  return normalizeOdailyItemUrl(url)
+}
+
 /** 仅 Odaily 文章、快讯与已核实文档页视为可点击来源 */
 export function isVerifiedSourceUrl(url: string | undefined): url is string {
-  if (!url) return false
-  if (ODAILY_URLS.has(url) || VERIFIED_DOCUMENT_URLS.has(url)) return true
-  return /^https:\/\/www\.odaily\.news\/zh-CN\/(post|newsflash)\/\d+$/.test(url)
+  return resolveSourceUrl(url) !== undefined
 }
 
 export function odailyHotTopics() {

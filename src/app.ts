@@ -1,6 +1,6 @@
 import { applyInterestFilters, buildDataLoading } from './dataEngine'
 import { loadOpportunitiesInto, loadPrescientData } from './prescientClient'
-import { isVerifiedSourceUrl } from './verifiedSources'
+import { isVerifiedSourceUrl, resolveSourceUrl } from './verifiedSources'
 import {
   INTEREST_TAGS,
   MODULES,
@@ -231,10 +231,10 @@ export function mountApp(root: HTMLElement) {
   }
 
   const renderBriefingOppCompact = (item: CryptoOpportunity) => {
-    const title =
-      item.url && isVerifiedSourceUrl(item.url)
-        ? `<a class="brief-opp-link" href="${item.url}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a>`
-        : escapeHtml(item.title)
+    const linkUrl = resolveSourceUrl(item.url)
+    const title = linkUrl
+      ? `<a class="brief-opp-link" href="${linkUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a>`
+      : escapeHtml(item.title)
     return `
       <div class="compact-item brief-opp-item">
         <span class="brief-opp-kind">${escapeHtml(item.kindLabel)}</span>
@@ -295,15 +295,17 @@ export function mountApp(root: HTMLElement) {
   `
 
   const renderDigestLineText = (item: DigestItem) => {
-    if (item.url && isVerifiedSourceUrl(item.url)) {
-      return `<a class="digest-flash-link" href="${item.url}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.text)}</a>`
+    const linkUrl = resolveSourceUrl(item.url)
+    if (linkUrl) {
+      return `<a class="digest-flash-link" href="${linkUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.text)}</a>`
     }
     return escapeHtml(item.text)
   }
 
   const renderDigestSourceLink = (item: DigestItem) => {
-    if (!item.url || !isVerifiedSourceUrl(item.url)) return ''
-    return `<a class="digest-source-link" href="${item.url}" target="_blank" rel="noopener noreferrer" title="打开 Odaily 原文">来源</a>`
+    const linkUrl = resolveSourceUrl(item.url)
+    if (!linkUrl) return ''
+    return `<a class="digest-source-link" href="${linkUrl}" target="_blank" rel="noopener noreferrer" title="打开 Odaily 原文">来源</a>`
   }
 
   const renderDigestLines = (items: DigestItem[], showSourceLink = false) =>
@@ -585,10 +587,10 @@ export function mountApp(root: HTMLElement) {
 
   const renderOpportunityCard = (item: CryptoOpportunity) => {
     const style = OPPORTUNITY_KIND_STYLE[item.kind]
-    const titleHtml =
-      item.url && isVerifiedSourceUrl(item.url)
-        ? `<a class="opp-title-link" href="${item.url}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a>`
-        : escapeHtml(item.title)
+    const linkUrl = resolveSourceUrl(item.url)
+    const titleHtml = linkUrl
+      ? `<a class="opp-title-link" href="${linkUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a>`
+      : escapeHtml(item.title)
     return `
       <article class="opp-card ${style.cls}">
         <div class="opp-card-head">
@@ -598,16 +600,17 @@ export function mountApp(root: HTMLElement) {
         <h4 class="opp-title">${titleHtml}</h4>
         ${item.highlight ? `<p class="opp-highlight">${escapeHtml(item.highlight)}</p>` : ''}
         <p class="opp-summary">${escapeHtml(item.summary.slice(0, 140))}${item.summary.length > 140 ? '…' : ''}</p>
+        ${renderOdailySourceLink(linkUrl)}
         ${renderSourceActions(item.sources, { compact: true })}
       </article>
     `
   }
 
   const renderOpportunityFallbackCard = (item: OpportunityFallbackItem) => {
-    const titleHtml =
-      item.url && isVerifiedSourceUrl(item.url)
-        ? `<a class="opp-title-link" href="${item.url}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a>`
-        : escapeHtml(item.title)
+    const linkUrl = resolveSourceUrl(item.url)
+    const titleHtml = linkUrl
+      ? `<a class="opp-title-link" href="${linkUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a>`
+      : escapeHtml(item.title)
     return `
       <article class="opp-card opp-fallback">
         <div class="opp-card-head">
@@ -616,6 +619,7 @@ export function mountApp(root: HTMLElement) {
         </div>
         <h4 class="opp-title">${titleHtml}</h4>
         <p class="opp-summary">${escapeHtml(item.summary.slice(0, 140))}${item.summary.length > 140 ? '…' : ''}</p>
+        ${renderOdailySourceLink(linkUrl)}
         ${renderSourceActions(item.sources, { compact: true })}
       </article>
     `
@@ -771,21 +775,21 @@ export function mountApp(root: HTMLElement) {
     if (!items?.length) return ''
     return `
       <div class="dispute-related">
-        <h4 class="dispute-related-title">同期相关快讯</h4>
+        <h4 class="dispute-related-title">话题相关快讯</h4>
         <ul class="dispute-related-list">
           ${items
-            .map(
-              (item) => `
+            .map((item) => {
+              const linkUrl = resolveSourceUrl(item.url)
+              const titleHtml = linkUrl
+                ? `<a class="dispute-related-link" href="${linkUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a>`
+                : `<span class="dispute-related-text">${escapeHtml(item.title)}</span>`
+              return `
             <li class="dispute-related-item">
               <span class="dispute-related-time">${escapeHtml(item.time)}</span>
-              ${
-                item.url && isVerifiedSourceUrl(item.url)
-                  ? `<a class="dispute-related-link" href="${item.url}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a>`
-                  : `<span class="dispute-related-text">${escapeHtml(item.title)}</span>`
-              }
+              ${titleHtml}
             </li>
-          `,
-            )
+          `
+            })
             .join('')}
         </ul>
       </div>
@@ -944,8 +948,9 @@ export function mountApp(root: HTMLElement) {
 
 function renderRawTitleLink(item: RawArticle): string {
   const title = escapeHtml(item.title)
-  if (item.url && isVerifiedSourceUrl(item.url)) {
-    return `<h4><a class="raw-title-link" href="${item.url}" target="_blank" rel="noopener noreferrer" title="直达原文">${title}</a></h4>`
+  const linkUrl = resolveSourceUrl(item.url)
+  if (linkUrl) {
+    return `<h4><a class="raw-title-link" href="${linkUrl}" target="_blank" rel="noopener noreferrer" title="直达原文">${title}</a></h4>`
   }
   return `<h4>${title}</h4>`
 }
@@ -962,11 +967,22 @@ function sourcesFromOne(source?: NewsSource): NewsSource[] | undefined {
   return source ? [source] : undefined
 }
 
+function renderOdailySourceLink(url: string | undefined): string {
+  if (!url) return ''
+  return `<a class="opp-source-link" href="${url}" target="_blank" rel="noopener noreferrer">查看 Odaily 原文 →</a>`
+}
+
 function renderSourceActions(
   sources: NewsSource[] | undefined,
   options: { compact?: boolean; inline?: boolean } = {},
 ): string {
-  const linked = sources?.filter((s) => isVerifiedSourceUrl(s.url)) ?? []
+  const linked =
+    sources
+      ?.map((s) => {
+        const url = resolveSourceUrl(s.url)
+        return url ? { name: s.name, url } : null
+      })
+      .filter((s): s is NewsSource => Boolean(s)) ?? []
   if (!linked.length) return ''
   const cls = ['source-actions', options.compact && 'compact', options.inline && 'inline']
     .filter(Boolean)

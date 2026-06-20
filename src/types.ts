@@ -87,6 +87,34 @@ export interface DigestHotTopic {
   url: string
 }
 
+export interface FlashCategoryBucket {
+  id: string
+  label: string
+  count: number
+  items: DigestItem[]
+}
+
+export const FLASH_CATEGORY_LABELS = [
+  { id: 'prediction-market', label: '预测市场' },
+  { id: 'ai', label: 'AI' },
+  { id: 'celebrity-views', label: '名人观点' },
+  { id: 'crypto-stocks', label: '币股动态' },
+  { id: 'project-updates', label: '项目动向' },
+  { id: 'onchain-data', label: '链上数据' },
+  { id: 'exchange-announcements', label: '交易所公告' },
+  { id: 'fundraising', label: '融资信息' },
+  { id: 'macro-policy', label: '宏观政策' },
+] as const
+
+export function emptyCategoryFlashes(): FlashCategoryBucket[] {
+  return FLASH_CATEGORY_LABELS.map(({ id, label }) => ({
+    id,
+    label,
+    count: 0,
+    items: [],
+  }))
+}
+
 export interface OdailyFlashDto {
   id: string
   title: string
@@ -104,9 +132,13 @@ export interface OdailyDigestPayload {
 
 export interface DigestData {
   dateLabel: string
+  /** 今日日期标签（分类筛选用） */
+  todayDateLabel: string
   updatedAt: string
   nextUpdateMinutes: number
   latestFlashes: DigestItem[]
+  /** 按分类聚合的今日全天快讯 */
+  categoryFlashes: FlashCategoryBucket[]
   crypto: {
     dateLabel: string
     items: DigestItem[]

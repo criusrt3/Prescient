@@ -511,8 +511,56 @@ body {
 .digest-meta {
   font-size: 0.78rem;
   color: var(--text-dim);
-  margin-bottom: 16px;
+  margin: 0 16px 16px;
   text-align: center;
+}
+
+.digest-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 16px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.digest-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.digest-cat:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.digest-cat.active {
+  color: var(--opt);
+  border-color: var(--opt);
+  background: color-mix(in srgb, var(--opt) 12%, transparent);
+}
+
+.digest-cat-count {
+  min-width: 1.2em;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 18%, transparent);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.digest-cat.active .digest-cat-count {
+  background: color-mix(in srgb, var(--opt) 22%, transparent);
 }
 
 .digest-live {

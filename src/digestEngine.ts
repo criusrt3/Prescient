@@ -1,4 +1,5 @@
 import type { DigestData, DigestItem, OdailyDigestPayload } from './types'
+import { emptyCategoryFlashes } from './types'
 
 function getBeijingTime(): { hour: number; minute: number } {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -57,9 +58,11 @@ export function buildDigestLoading(): DigestData {
   const slot = twoHourSlot(hour)
   return {
     dateLabel,
+    todayDateLabel: dateLabel,
     updatedAt: `${dateLabel} ${String(slot).padStart(2, '0')}:00`,
     nextUpdateMinutes: minutesToNextUpdate(),
     latestFlashes: [{ id: 'loading', text: '正在从 Odaily 拉取最新快讯…' }],
+    categoryFlashes: emptyCategoryFlashes(),
     crypto: {
       dateLabel,
       items: [{ id: 'loading-c', text: '正在加载币圈快讯…' }],
@@ -76,9 +79,11 @@ export function buildDigestFromOdaily(payload: OdailyDigestPayload): DigestData 
 
   return {
     dateLabel,
+    todayDateLabel: dateLabel,
     updatedAt: payload.fetchedAt,
     nextUpdateMinutes: minutesToNextUpdate(),
     latestFlashes: toDigestItems(payload.latestFlashes),
+    categoryFlashes: emptyCategoryFlashes(),
     crypto: {
       dateLabel,
       items: toDigestItems(payload.cryptoFlashes),
@@ -103,9 +108,11 @@ export function buildDigestFallback(error?: string): DigestData {
   const msg = error ? `拉取失败：${error}；` : FALLBACK_LATEST[0].text
   return {
     dateLabel,
+    todayDateLabel: dateLabel,
     updatedAt: `${dateLabel} ${String(slot).padStart(2, '0')}:00`,
     nextUpdateMinutes: minutesToNextUpdate(),
     latestFlashes: [{ id: 'err', text: msg }],
+    categoryFlashes: emptyCategoryFlashes(),
     crypto: { dateLabel, items: [{ id: 'err-c', text: msg }] },
     hotTopic: { title: 'Odaily 星球日报', url: 'https://www.odaily.news/zh-CN/' },
     live: false,

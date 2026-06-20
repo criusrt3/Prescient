@@ -9,6 +9,63 @@ const UA = 'Prescient-UI/0.2 (+vite-odaily-proxy)'
 
 const CRYPTO_KW =
   /BTC|ETH|SOL|BNB|XRP|USDT|ETF|DeFi|Web3|Polymarket|比特币|以太坊|加密|区块链|代币|合约|巨鲸|交易所|Strategy|Tether|Upbit|钱包|链上/i
+
+/** 最新快讯分类 — 标题/正文关键词匹配（Odaily RSS 无 category 字段） */
+const FLASH_CATEGORIES: { id: string; label: string; pattern: RegExp }[] = [
+  {
+    id: 'prediction-market',
+    label: '预测市场',
+    pattern: /Polymarket|Kalshi|Opinion\.trade|预测市场|押注市场|对赌市场/i,
+  },
+  {
+    id: 'ai',
+    label: 'AI',
+    pattern:
+      /OpenAI|Anthropic|Claude|GPT-?\d|DeepSeek|大模型|人工智能|英伟达|NVIDIA|半导体|芯片|生成式|Gemini|Llama|xAI|Sora|智谱|Minimax|AI\s*(监管|芯片|模型)/i,
+  },
+  {
+    id: 'celebrity-views',
+    label: '名人观点',
+    pattern:
+      /CZ|Vitalik|Buterin|孙宇晨|马斯克|Musk|Trump|特朗普|Arthur\s*Hayes|赵长鹏|何一|SBF|Brian\s*Armstrong|观点|看法|表示|认为|称|喊话|警告|发文|推特|点评|评论/i,
+  },
+  {
+    id: 'crypto-stocks',
+    label: '币股动态',
+    pattern:
+      /Strategy|MicroStrategy|MSTR|STRC|币股|矿业股|矿工股|Riot|Marathon|CleanSpark|Hut\s*8|Core\s*Scientific|IREN|Cipher|Bitfarms|MARA|RIOT/i,
+  },
+  {
+    id: 'project-updates',
+    label: '项目动向',
+    pattern:
+      /主网|测试网|硬分叉|空投|解锁|集成|合作|推出|发布|治理|提案|投票|Layer\s*\d|L2|Rollup|跨链|桥接|协议升级|路线图/i,
+  },
+  {
+    id: 'onchain-data',
+    label: '链上数据',
+    pattern:
+      /链上|巨鲸|净流入|净流出|TVL|Gas\s*费|质押量|持仓|地址数|转账|流入|流出|资金费率|清算|未平仓|创历史新高|创历史新低/i,
+  },
+  {
+    id: 'exchange-announcements',
+    label: '交易所公告',
+    pattern:
+      /Upbit|Binance|币安|Coinbase|OKX|Bybit|Kraken|Bitget|Gate\.io|抹茶|交易所|上币|下架|退市|暂停交易|恢复交易|充提|公告|上线交易|现货|合约上线/i,
+  },
+  {
+    id: 'fundraising',
+    label: '融资信息',
+    pattern:
+      /融资|投资|领投|参投|估值|募资|种子轮|A轮|B轮|C轮|亿美元|万美元|收购|并购|IPO|挂牌|私募股权|风投|基金增持|战略投资/i,
+  },
+  {
+    id: 'macro-policy',
+    label: '宏观政策',
+    pattern:
+      /美联储|Fed|降息|加息|通胀|CPI|PPI|非农|央行|ECB|BOJ|SEC|CFTC|监管|法案|立法|宏观|国债|利率|关税|制裁|地缘|战争|政策|商务部|财政部/i,
+  },
+]
 const HARD_KW = /监管|法案|央行|美联储|战争|制裁|SEC|CFTC|立案|通过|生效/i
 const AGENDA_KW =
   /明日|将于|本周|下周|发布会|听证会|利率决议|数据公布|上线|开幕|公布|决议|即将|预计|召开|峰会|解锁|空投|投票|升级|财报|业绩|审议|听证/i
@@ -368,6 +425,20 @@ function toDigestItem(f: RssItem): { id: string; text: string; url?: string } {
   return url ? { id: f.id, text, url } : { id: f.id, text }
 }
 
+function todayFlashPool(flashes: RssItem[]): RssItem[] {
+  return flashes.filter((f) => isToday(f.publishedAt))
+}
+
+function buildCategoryFlashes(flashes: RssItem[]) {
+  const today = todayFlashPool(flashes)
+  return FLASH_CATEGORIES.map(({ id, label, pattern }) => {
+    const items = today
+      .filter((f) => pattern.test(`${f.title} ${f.body ?? ''}`))
+      .map((f) => toDigestItem(f))
+    return { id, label, count: items.length, items }
+  })
+}
+
 function isToday(iso?: string): boolean {
   if (!iso) return false
   const day = new Intl.DateTimeFormat('en-CA', {
@@ -553,9 +624,11 @@ function buildPrescient(flashes: RssItem[], posts: RssItem[]) {
 
   const digest = {
     dateLabel: bjDateLabel(),
+    todayDateLabel: bjDateLabel(),
     updatedAt: `${bjDateLabel()} ${String(clock.hour).padStart(2, '0')}:${String(clock.minute).padStart(2, '0')}`,
     nextUpdateMinutes: nextMins,
     latestFlashes: flashes.slice(0, 15).map((f) => toDigestItem(f)),
+    categoryFlashes: buildCategoryFlashes(flashes),
     crypto: {
       dateLabel: cryptoDateLabel,
       items: cryptoItems.map((f) => toDigestItem(f)),

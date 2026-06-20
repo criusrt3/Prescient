@@ -40,6 +40,86 @@ NARRATIVE_TOPICS = [
     ("地缘局势", re.compile(r"伊朗|以色列|黎巴嫩|战争|停火|导弹", re.I)),
 ]
 
+FLASH_CATEGORIES = [
+    (
+        "prediction-market",
+        "预测市场",
+        re.compile(r"Polymarket|Kalshi|Opinion\.trade|预测市场|押注市场|对赌市场", re.I),
+    ),
+    (
+        "ai",
+        "AI",
+        re.compile(
+            r"OpenAI|Anthropic|Claude|GPT-?\d|DeepSeek|大模型|人工智能|英伟达|NVIDIA|"
+            r"半导体|芯片|生成式|Gemini|Llama|xAI|Sora|智谱|Minimax|AI\s*(监管|芯片|模型)",
+            re.I,
+        ),
+    ),
+    (
+        "celebrity-views",
+        "名人观点",
+        re.compile(
+            r"CZ|Vitalik|Buterin|孙宇晨|马斯克|Musk|Trump|特朗普|Arthur\s*Hayes|赵长鹏|何一|"
+            r"SBF|Brian\s*Armstrong|观点|看法|表示|认为|称|喊话|警告|发文|推特|点评|评论",
+            re.I,
+        ),
+    ),
+    (
+        "crypto-stocks",
+        "币股动态",
+        re.compile(
+            r"Strategy|MicroStrategy|MSTR|STRC|币股|矿业股|矿工股|Riot|Marathon|CleanSpark|"
+            r"Hut\s*8|Core\s*Scientific|IREN|Cipher|Bitfarms|MARA|RIOT",
+            re.I,
+        ),
+    ),
+    (
+        "project-updates",
+        "项目动向",
+        re.compile(
+            r"主网|测试网|硬分叉|空投|解锁|集成|合作|推出|发布|治理|提案|投票|Layer\s*\d|"
+            r"L2|Rollup|跨链|桥接|协议升级|路线图",
+            re.I,
+        ),
+    ),
+    (
+        "onchain-data",
+        "链上数据",
+        re.compile(
+            r"链上|巨鲸|净流入|净流出|TVL|Gas\s*费|质押量|持仓|地址数|转账|流入|流出|"
+            r"资金费率|清算|未平仓|创历史新高|创历史新低",
+            re.I,
+        ),
+    ),
+    (
+        "exchange-announcements",
+        "交易所公告",
+        re.compile(
+            r"Upbit|Binance|币安|Coinbase|OKX|Bybit|Kraken|Bitget|Gate\.io|抹茶|交易所|"
+            r"上币|下架|退市|暂停交易|恢复交易|充提|公告|上线交易|现货|合约上线",
+            re.I,
+        ),
+    ),
+    (
+        "fundraising",
+        "融资信息",
+        re.compile(
+            r"融资|投资|领投|参投|估值|募资|种子轮|A轮|B轮|C轮|亿美元|万美元|收购|并购|"
+            r"IPO|挂牌|私募股权|风投|基金增持|战略投资",
+            re.I,
+        ),
+    ),
+    (
+        "macro-policy",
+        "宏观政策",
+        re.compile(
+            r"美联储|Fed|降息|加息|通胀|CPI|PPI|非农|央行|ECB|BOJ|SEC|CFTC|监管|法案|"
+            r"立法|宏观|国债|利率|关税|制裁|地缘|战争|政策|商务部|财政部",
+            re.I,
+        ),
+    ),
+]
+
 
 def _now_bj() -> datetime:
     return datetime.now(BJ)
@@ -558,6 +638,23 @@ def _build_raw(
     }
 
 
+def _today_flash_pool(flashes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [f for f in flashes if _is_today(f.get("publishedAt"))]
+
+
+def _build_category_flashes(flashes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    today = _today_flash_pool(flashes)
+    buckets: list[dict[str, Any]] = []
+    for cat_id, label, pattern in FLASH_CATEGORIES:
+        items = []
+        for flash in today:
+            text = f"{flash['title']} {flash.get('body') or ''}"
+            if pattern.search(text):
+                items.append(_to_digest_item(flash))
+        buckets.append({"id": cat_id, "label": label, "count": len(items), "items": items})
+    return buckets
+
+
 def _build_digest(flashes: list[dict[str, Any]], posts: list[dict[str, Any]]) -> dict[str, Any]:
     date_label = _date_label()
     fetched_at = _now_bj().strftime(f"{date_label} %H:%M")
@@ -571,9 +668,11 @@ def _build_digest(flashes: list[dict[str, Any]], posts: list[dict[str, Any]]) ->
 
     return {
         "dateLabel": date_label,
+        "todayDateLabel": date_label,
         "updatedAt": fetched_at,
         "nextUpdateMinutes": next_mins,
         "latestFlashes": [_to_digest_item(f) for f in flashes[:15]],
+        "categoryFlashes": _build_category_flashes(flashes),
         "crypto": {
             "dateLabel": crypto_date_label,
             "items": [_to_digest_item(f) for f in crypto],

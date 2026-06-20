@@ -48,6 +48,7 @@ export function mountApp(root: HTMLElement) {
     (localStorage.getItem(THEME_KEY) as ThemeMode | null) ?? 'dark'
   let digestTimer: ReturnType<typeof setTimeout> | null = null
   let digestTab: 'hourly' | 'crypto' = 'hourly'
+  let digestFlashCategory: string | null = null
   let dataRefreshing = false
 
   const refreshAllData = async () => {
@@ -266,20 +267,66 @@ export function mountApp(root: HTMLElement) {
     <a class="digest-url" href="${topic.url}" target="_blank" rel="noopener">${escapeHtml(topic.url)}</a>
   `
 
+  const renderDigestCategoryNav = (d: PrescientData) => {
+    const categories = d.digest.categoryFlashes ?? []
+    const chips = categories
+      .map(
+        (cat) => `
+        <button
+          type="button"
+          class="digest-cat ${digestFlashCategory === cat.id ? 'active' : ''}"
+          data-flash-cat="${cat.id}"
+        >
+          ${escapeHtml(cat.label)}
+          <span class="digest-cat-count">${cat.count}</span>
+        </button>
+      `,
+      )
+      .join('')
+
+    return `
+      <nav class="digest-categories" aria-label="快讯分类">
+        <button
+          type="button"
+          class="digest-cat ${digestFlashCategory === null ? 'active' : ''}"
+          data-flash-cat="all"
+        >
+          全部
+        </button>
+        ${chips}
+      </nav>
+    `
+  }
+
   const renderDigest = (d: PrescientData) => {
     const cryptoTitle = `币圈快讯 (${d.digest.crypto.dateLabel}）`
+    const categories = d.digest.categoryFlashes ?? []
+    const activeCategory = digestFlashCategory
+      ? categories.find((c) => c.id === digestFlashCategory)
+      : null
 
     const tabContent = () => {
       switch (digestTab) {
-        case 'hourly':
+        case 'hourly': {
+          const hourlyItems = activeCategory?.items ?? d.digest.latestFlashes
+          const hourlyMeta = activeCategory
+            ? `今日 ${escapeHtml(activeCategory.label)} · ${escapeHtml(d.digest.todayDateLabel ?? d.digest.dateLabel)} · 共 ${activeCategory.count} 条 · ${escapeHtml(d.digest.sourceLabel ?? 'Odaily')}`
+            : `更新时间 ${escapeHtml(d.digest.updatedAt)} · ${escapeHtml(d.digest.sourceLabel ?? 'Odaily')} · 每两小时更新 · ${d.digest.nextUpdateMinutes} 分钟后刷新${
+                d.digest.live ? '<span class="digest-live">· 实时</span>' : ''
+              }`
+
+          const hourlyBody =
+            hourlyItems.length > 0
+              ? renderDigestLines(hourlyItems)
+              : `<p class="digest-line muted">今日暂无「${escapeHtml(activeCategory?.label ?? '')}」相关快讯，请切换其他分类或稍后刷新。</p>`
+
           return `
             <h3 class="digest-content-title">最新快讯</h3>
-            <p class="digest-meta">
-              更新时间 ${escapeHtml(d.digest.updatedAt)} · ${escapeHtml(d.digest.sourceLabel ?? 'Odaily')} · 每两小时更新 · ${d.digest.nextUpdateMinutes} 分钟后刷新
-              ${d.digest.live ? '<span class="digest-live">· 实时</span>' : ''}
-            </p>
-            <div class="digest-body">${renderDigestLines(d.digest.latestFlashes)}</div>
+            ${renderDigestCategoryNav(d)}
+            <p class="digest-meta">${hourlyMeta}</p>
+            <div class="digest-body">${hourlyBody}</div>
           `
+        }
         case 'crypto':
           return `
             <h3 class="digest-content-title">${escapeHtml(cryptoTitle)}</h3>
@@ -664,6 +711,14 @@ export function mountApp(root: HTMLElement) {
     root.querySelectorAll('[data-digest-tab]').forEach((el) => {
       el.addEventListener('click', () => {
         digestTab = (el as HTMLElement).dataset.digestTab as typeof digestTab
+        render()
+      })
+    })
+
+    root.querySelectorAll('[data-flash-cat]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const id = (el as HTMLElement).dataset.flashCat
+        digestFlashCategory = id === 'all' ? null : (id ?? null)
         render()
       })
     })

@@ -40,85 +40,106 @@ NARRATIVE_TOPICS = [
     ("地缘局势", re.compile(r"伊朗|以色列|黎巴嫩|战争|停火|导弹", re.I)),
 ]
 
-FLASH_CATEGORIES = [
-    (
-        "prediction-market",
-        "预测市场",
-        re.compile(r"Polymarket|Kalshi|Opinion\.trade|预测市场|押注市场|对赌市场", re.I),
-    ),
-    (
-        "ai",
-        "AI",
-        re.compile(
-            r"OpenAI|Anthropic|Claude|GPT-?\d|DeepSeek|大模型|人工智能|英伟达|NVIDIA|"
-            r"半导体|芯片|生成式|Gemini|Llama|xAI|Sora|智谱|Minimax|AI\s*(监管|芯片|模型)",
-            re.I,
-        ),
-    ),
-    (
-        "celebrity-views",
-        "名人观点",
-        re.compile(
-            r"CZ|Vitalik|Buterin|孙宇晨|马斯克|Musk|Trump|特朗普|Arthur\s*Hayes|赵长鹏|何一|"
-            r"SBF|Brian\s*Armstrong|观点|看法|表示|认为|称|喊话|警告|发文|推特|点评|评论",
-            re.I,
-        ),
-    ),
-    (
-        "crypto-stocks",
-        "币股动态",
-        re.compile(
-            r"Strategy|MicroStrategy|MSTR|STRC|币股|矿业股|矿工股|Riot|Marathon|CleanSpark|"
-            r"Hut\s*8|Core\s*Scientific|IREN|Cipher|Bitfarms|MARA|RIOT",
-            re.I,
-        ),
-    ),
-    (
-        "project-updates",
-        "项目动向",
-        re.compile(
-            r"主网|测试网|硬分叉|空投|解锁|集成|合作|推出|发布|治理|提案|投票|Layer\s*\d|"
-            r"L2|Rollup|跨链|桥接|协议升级|路线图",
-            re.I,
-        ),
-    ),
-    (
-        "onchain-data",
-        "链上数据",
-        re.compile(
-            r"链上|巨鲸|净流入|净流出|TVL|Gas\s*费|质押量|持仓|地址数|转账|流入|流出|"
-            r"资金费率|清算|未平仓|创历史新高|创历史新低",
-            re.I,
-        ),
-    ),
-    (
-        "exchange-announcements",
-        "交易所公告",
-        re.compile(
-            r"Upbit|Binance|币安|Coinbase|OKX|Bybit|Kraken|Bitget|Gate\.io|抹茶|交易所|"
-            r"上币|下架|退市|暂停交易|恢复交易|充提|公告|上线交易|现货|合约上线",
-            re.I,
-        ),
-    ),
-    (
-        "fundraising",
-        "融资信息",
-        re.compile(
-            r"融资|投资|领投|参投|估值|募资|种子轮|A轮|B轮|C轮|亿美元|万美元|收购|并购|"
-            r"IPO|挂牌|私募股权|风投|基金增持|战略投资",
-            re.I,
-        ),
-    ),
-    (
-        "macro-policy",
-        "宏观政策",
-        re.compile(
-            r"美联储|Fed|降息|加息|通胀|CPI|PPI|非农|央行|ECB|BOJ|SEC|CFTC|监管|法案|"
-            r"立法|宏观|国债|利率|关税|制裁|地缘|战争|政策|商务部|财政部",
-            re.I,
-        ),
-    ),
+PLANET_DIGEST_RE = re.compile(r"^星球(早|午|晚)讯")
+
+FLASH_CATEGORY_DEFS = [
+    ("prediction-market", "预测市场"),
+    ("ai", "AI"),
+    ("celebrity-views", "名人观点"),
+    ("crypto-stocks", "币股动态"),
+    ("project-updates", "项目动向"),
+    ("onchain-data", "链上数据"),
+    ("exchange-announcements", "交易所公告"),
+    ("fundraising", "融资信息"),
+    ("macro-policy", "宏观政策"),
 ]
+
+CELEBRITY_TITLE_RE = re.compile(
+    r"^(?:观点[：:]|(?:.*?(?:CEO|创始人|联创|董事长|发言人|分析师|教授|议员|记者|理事|博士|行长|部长|主席))"
+    r"(?:[：:]|(?=\s*(?:表示|称|认为|发文|喊话|回应|点评))|(?=疑似))|"
+    r"(?:Tom Lee|Michael Saylor|CZ|Vitalik|Buterin|孙宇晨|马斯克|Musk|Trump|特朗普|Arthur\s*Hayes|"
+    r"赵长鹏|何一|SBF|Ki Young Ju|Jake Chervinsky|Fabian Dori|Alex Svanevik|Vitalik Buterin)[：:])",
+    re.I,
+)
+
+
+def _flash_title_clean(title: str) -> str:
+    return re.sub(r"^【快讯】\s*", "", title).strip()
+
+
+def _classify_flash_categories(flash: dict[str, Any]) -> list[str]:
+    title = _flash_title_clean(flash["title"])
+    if PLANET_DIGEST_RE.match(title):
+        return []
+
+    snippet = (flash.get("body") or "")[:180]
+    ids: list[str] = []
+
+    if re.search(r"Polymarket|Kalshi|Opinion\.trade|预测市场|押注市场|对赌市场", title + snippet, re.I):
+        ids.append("prediction-market")
+
+    if re.search(
+        r"人工智能|大模型|OpenAI|Anthropic|Claude|GPT-?\d|DeepSeek|英伟达|NVIDIA|LLM|生成式\s*AI|"
+        r"AI\s*基础设施|Gemini|Llama|xAI|Sora|智谱|Minimax",
+        title,
+        re.I,
+    ) or (re.search(r"AI", title, re.I) and re.search(r"基础设施|监管|模型|芯片", title, re.I)):
+        ids.append("ai")
+
+    if CELEBRITY_TITLE_RE.search(title):
+        ids.append("celebrity-views")
+
+    if re.search(
+        r"纳斯达克|纽交所|美股|港股|上市公司|矿企|矿业股|币股|MSTR|STRC|Bitdeer|Riot|Marathon|"
+        r"CleanSpark|IREN|MARA|RIOT",
+        title + snippet,
+        re.I,
+    ):
+        ids.append("crypto-stocks")
+
+    if re.search(
+        r"主网上线|测试网上线|硬分叉|空投(?:开启|发放)?|代币解锁|治理提案|协议升级|跨链桥|"
+        r"Layer\s*2|\bL2\b|Rollup|路线图|主网将于",
+        title,
+        re.I,
+    ):
+        ids.append("project-updates")
+
+    if re.search(
+        r"链上(?:数据|监测|分析|显示|记录)|巨鲸|TVL|Gas\s*费|资金费率|净流入|净流出|未平仓|"
+        r"清算(?:额|数据)|监测.*(?:增持|减持)|(?:增持|减持).*(?:枚|万美元|万枚)|转移.*\d+.*枚",
+        title,
+        re.I,
+    ) or (re.search(r"持仓", title) and re.search(r"枚|万美元|万枚|BTC|ETH|SOL", title, re.I)):
+        ids.append("onchain-data")
+
+    if re.search(
+        r"^(?:Gate|Upbit|Binance|币安|Coinbase|OKX|Bybit|Kraken|Bitget|抹茶|Hyperliquid)",
+        title,
+        re.I,
+    ) and re.search(r"上线|下架|退市|暂停|恢复|充提|公告|现货|合约", title, re.I):
+        ids.append("exchange-announcements")
+
+    if re.search(
+        r"融资|领投|参投|估值达|募资|种子轮|A\s*轮融资|B\s*轮融资|完成.*亿美元|完成.*万美元|"
+        r"战略投资|收购|并购|拟\s*IPO",
+        title,
+        re.I,
+    ):
+        ids.append("fundraising")
+
+    if re.search(
+        r"美联储|Fed|降息|加息|CPI|PPI|非农|央行|ECB|SEC|CFTC|监管(?:框架|政策)|法案|立法|关税|"
+        r"制裁|商务部|财政部|参议院|国会|白宫|停火|战争|导弹|袭击|冲突|攻击|地缘|检察官|洗钱|合规",
+        title,
+        re.I,
+    ) or (
+        re.search(r"伊朗|以色列|黎巴嫩|俄罗斯|乌克兰", title)
+        and re.search(r"战争|冲突|袭击|制裁|停火|导弹|炮击|攻击|敌对|不信任", title + snippet)
+    ):
+        ids.append("macro-policy")
+
+    return ids
 
 
 def _now_bj() -> datetime:
@@ -159,7 +180,6 @@ def _flash_text(title: str) -> str:
     return clean if clean.endswith(("；", ";")) else f"{clean}；"
 
 
-PLANET_DIGEST_RE = re.compile(r"^星球(早|午|晚)讯")
 ODAILY_ITEM_URL_RE = re.compile(r"^https://www\.odaily\.news/zh-CN/(post|newsflash)/\d+$")
 
 
@@ -644,14 +664,24 @@ def _today_flash_pool(flashes: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _build_category_flashes(flashes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     today = _today_flash_pool(flashes)
-    buckets: list[dict[str, Any]] = []
-    for cat_id, label, pattern in FLASH_CATEGORIES:
-        items = []
-        for flash in today:
-            text = f"{flash['title']} {flash.get('body') or ''}"
-            if pattern.search(text):
-                items.append(_to_digest_item(flash))
-        buckets.append({"id": cat_id, "label": label, "count": len(items), "items": items})
+    buckets = [
+        {"id": cat_id, "label": label, "count": 0, "items": []}
+        for cat_id, label in FLASH_CATEGORY_DEFS
+    ]
+    bucket_map = {bucket["id"]: bucket for bucket in buckets}
+
+    for flash in today:
+        cat_ids = _classify_flash_categories(flash)
+        if not cat_ids:
+            continue
+        item = _to_digest_item(flash)
+        for cat_id in cat_ids:
+            bucket = bucket_map.get(cat_id)
+            if not bucket:
+                continue
+            bucket["items"].append(item)
+            bucket["count"] += 1
+
     return buckets
 
 

@@ -10,62 +10,103 @@ const UA = 'Prescient-UI/0.2 (+vite-odaily-proxy)'
 const CRYPTO_KW =
   /BTC|ETH|SOL|BNB|XRP|USDT|ETF|DeFi|Web3|Polymarket|比特币|以太坊|加密|区块链|代币|合约|巨鲸|交易所|Strategy|Tether|Upbit|钱包|链上/i
 
-/** 最新快讯分类 — 标题/正文关键词匹配（Odaily RSS 无 category 字段） */
-const FLASH_CATEGORIES: { id: string; label: string; pattern: RegExp }[] = [
-  {
-    id: 'prediction-market',
-    label: '预测市场',
-    pattern: /Polymarket|Kalshi|Opinion\.trade|预测市场|押注市场|对赌市场/i,
-  },
-  {
-    id: 'ai',
-    label: 'AI',
-    pattern:
-      /OpenAI|Anthropic|Claude|GPT-?\d|DeepSeek|大模型|人工智能|英伟达|NVIDIA|半导体|芯片|生成式|Gemini|Llama|xAI|Sora|智谱|Minimax|AI\s*(监管|芯片|模型)/i,
-  },
-  {
-    id: 'celebrity-views',
-    label: '名人观点',
-    pattern:
-      /CZ|Vitalik|Buterin|孙宇晨|马斯克|Musk|Trump|特朗普|Arthur\s*Hayes|赵长鹏|何一|SBF|Brian\s*Armstrong|观点|看法|表示|认为|称|喊话|警告|发文|推特|点评|评论/i,
-  },
-  {
-    id: 'crypto-stocks',
-    label: '币股动态',
-    pattern:
-      /Strategy|MicroStrategy|MSTR|STRC|币股|矿业股|矿工股|Riot|Marathon|CleanSpark|Hut\s*8|Core\s*Scientific|IREN|Cipher|Bitfarms|MARA|RIOT/i,
-  },
-  {
-    id: 'project-updates',
-    label: '项目动向',
-    pattern:
-      /主网|测试网|硬分叉|空投|解锁|集成|合作|推出|发布|治理|提案|投票|Layer\s*\d|L2|Rollup|跨链|桥接|协议升级|路线图/i,
-  },
-  {
-    id: 'onchain-data',
-    label: '链上数据',
-    pattern:
-      /链上|巨鲸|净流入|净流出|TVL|Gas\s*费|质押量|持仓|地址数|转账|流入|流出|资金费率|清算|未平仓|创历史新高|创历史新低/i,
-  },
-  {
-    id: 'exchange-announcements',
-    label: '交易所公告',
-    pattern:
-      /Upbit|Binance|币安|Coinbase|OKX|Bybit|Kraken|Bitget|Gate\.io|抹茶|交易所|上币|下架|退市|暂停交易|恢复交易|充提|公告|上线交易|现货|合约上线/i,
-  },
-  {
-    id: 'fundraising',
-    label: '融资信息',
-    pattern:
-      /融资|投资|领投|参投|估值|募资|种子轮|A轮|B轮|C轮|亿美元|万美元|收购|并购|IPO|挂牌|私募股权|风投|基金增持|战略投资/i,
-  },
-  {
-    id: 'macro-policy',
-    label: '宏观政策',
-    pattern:
-      /美联储|Fed|降息|加息|通胀|CPI|PPI|非农|央行|ECB|BOJ|SEC|CFTC|监管|法案|立法|宏观|国债|利率|关税|制裁|地缘|战争|政策|商务部|财政部/i,
-  },
+/** 最新快讯分类定义（匹配逻辑见 classifyFlashCategories） */
+const FLASH_CATEGORY_DEFS: { id: string; label: string }[] = [
+  { id: 'prediction-market', label: '预测市场' },
+  { id: 'ai', label: 'AI' },
+  { id: 'celebrity-views', label: '名人观点' },
+  { id: 'crypto-stocks', label: '币股动态' },
+  { id: 'project-updates', label: '项目动向' },
+  { id: 'onchain-data', label: '链上数据' },
+  { id: 'exchange-announcements', label: '交易所公告' },
+  { id: 'fundraising', label: '融资信息' },
+  { id: 'macro-policy', label: '宏观政策' },
 ]
+
+const CELEBRITY_TITLE_RE =
+  /^(?:观点[：:]|(?:.*?(?:CEO|创始人|联创|董事长|发言人|分析师|教授|议员|记者|理事|博士|行长|部长|主席))(?:[：:]|(?=\s*(?:表示|称|认为|发文|喊话|回应|点评))|(?=疑似))|(?:Tom Lee|Michael Saylor|CZ|Vitalik|Buterin|孙宇晨|马斯克|Musk|Trump|特朗普|Arthur\s*Hayes|赵长鹏|何一|SBF|Ki Young Ju|Jake Chervinsky|Fabian Dori|Alex Svanevik|Vitalik Buterin)[：:])/i
+
+function flashTitleClean(title: string): string {
+  return title.replace(/^【快讯】\s*/, '').trim()
+}
+
+/** 标题优先 + 短正文辅助，避免「表示/认为/链上」等泛词误伤 */
+function classifyFlashCategories(f: RssItem): string[] {
+  const title = flashTitleClean(f.title)
+  if (isPlanetDigestTitle(f.title)) return []
+
+  const snippet = (f.body ?? '').slice(0, 180)
+  const ids: string[] = []
+
+  if (/Polymarket|Kalshi|Opinion\.trade|预测市场|押注市场|对赌市场/i.test(title + snippet)) {
+    ids.push('prediction-market')
+  }
+
+  if (
+    /人工智能|大模型|OpenAI|Anthropic|Claude|GPT-?\d|DeepSeek|英伟达|NVIDIA|LLM|生成式\s*AI|AI\s*基础设施|Gemini|Llama|xAI|Sora|智谱|Minimax/i.test(
+      title,
+    ) ||
+    (/AI/i.test(title) && /基础设施|监管|模型|芯片/i.test(title))
+  ) {
+    ids.push('ai')
+  }
+
+  if (CELEBRITY_TITLE_RE.test(title)) {
+    ids.push('celebrity-views')
+  }
+
+  if (
+    /纳斯达克|纽交所|美股|港股|上市公司|矿企|矿业股|币股|MSTR|STRC|Bitdeer|Riot|Marathon|CleanSpark|IREN|MARA|RIOT/i.test(
+      title + snippet,
+    )
+  ) {
+    ids.push('crypto-stocks')
+  }
+
+  if (
+    /主网上线|测试网上线|硬分叉|空投(?:开启|发放)?|代币解锁|治理提案|协议升级|跨链桥|Layer\s*2|\bL2\b|Rollup|路线图|主网将于/i.test(
+      title,
+    )
+  ) {
+    ids.push('project-updates')
+  }
+
+  if (
+    /链上(?:数据|监测|分析|显示|记录)|巨鲸|TVL|Gas\s*费|资金费率|净流入|净流出|未平仓|清算(?:额|数据)|监测.*(?:增持|减持)|(?:增持|减持).*(?:枚|万美元|万枚)|转移.*\d+.*枚/i.test(
+      title,
+    ) ||
+    (/持仓/.test(title) && /枚|万美元|万枚|BTC|ETH|SOL/i.test(title))
+  ) {
+    ids.push('onchain-data')
+  }
+
+  if (
+    /^(?:Gate|Upbit|Binance|币安|Coinbase|OKX|Bybit|Kraken|Bitget|抹茶|Hyperliquid)/i.test(title) &&
+    /上线|下架|退市|暂停|恢复|充提|公告|现货|合约/i.test(title)
+  ) {
+    ids.push('exchange-announcements')
+  }
+
+  if (
+    /融资|领投|参投|估值达|募资|种子轮|A\s*轮融资|B\s*轮融资|完成.*亿美元|完成.*万美元|战略投资|收购|并购|拟\s*IPO/i.test(
+      title,
+    )
+  ) {
+    ids.push('fundraising')
+  }
+
+  if (
+    /美联储|Fed|降息|加息|CPI|PPI|非农|央行|ECB|SEC|CFTC|监管(?:框架|政策)|法案|立法|关税|制裁|商务部|财政部|参议院|国会|白宫|停火|战争|导弹|袭击|冲突|攻击|地缘|检察官|洗钱|合规/i.test(
+      title,
+    ) ||
+    (/伊朗|以色列|黎巴嫩|俄罗斯|乌克兰/.test(title) &&
+      /战争|冲突|袭击|制裁|停火|导弹|炮击|攻击|敌对|不信任/i.test(title + snippet))
+  ) {
+    ids.push('macro-policy')
+  }
+
+  return ids
+}
 const HARD_KW = /监管|法案|央行|美联储|战争|制裁|SEC|CFTC|立案|通过|生效/i
 const AGENDA_KW =
   /明日|将于|本周|下周|发布会|听证会|利率决议|数据公布|上线|开幕|公布|决议|即将|预计|召开|峰会|解锁|空投|投票|升级|财报|业绩|审议|听证/i
@@ -431,12 +472,27 @@ function todayFlashPool(flashes: RssItem[]): RssItem[] {
 
 function buildCategoryFlashes(flashes: RssItem[]) {
   const today = todayFlashPool(flashes)
-  return FLASH_CATEGORIES.map(({ id, label, pattern }) => {
-    const items = today
-      .filter((f) => pattern.test(`${f.title} ${f.body ?? ''}`))
-      .map((f) => toDigestItem(f))
-    return { id, label, count: items.length, items }
-  })
+  const buckets = FLASH_CATEGORY_DEFS.map(({ id, label }) => ({
+    id,
+    label,
+    count: 0,
+    items: [] as ReturnType<typeof toDigestItem>[],
+  }))
+  const bucketMap = new Map(buckets.map((b) => [b.id, b]))
+
+  for (const f of today) {
+    const cats = classifyFlashCategories(f)
+    if (!cats.length) continue
+    const item = toDigestItem(f)
+    for (const catId of cats) {
+      const bucket = bucketMap.get(catId)
+      if (!bucket) continue
+      bucket.items.push(item)
+      bucket.count += 1
+    }
+  }
+
+  return buckets
 }
 
 function isToday(iso?: string): boolean {

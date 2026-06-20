@@ -78,6 +78,8 @@ export interface BriefingData {
 export interface DigestItem {
   id: string
   text: string
+  /** 星球早讯 / 午讯 / 晚讯等可直达 Odaily 原文 */
+  url?: string
 }
 
 export interface DigestHotTopic {

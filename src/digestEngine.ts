@@ -33,11 +33,15 @@ function formatFlashLine(title: string): string {
   return clean.endsWith('；') || clean.endsWith(';') ? clean : `${clean}；`
 }
 
-function toDigestItems(items: { id: string; title: string }[]): DigestItem[] {
-  return items.map((item) => ({
-    id: String(item.id),
-    text: formatFlashLine(item.title),
-  }))
+function toDigestItems(items: { id: string; title: string; url?: string }[]): DigestItem[] {
+  return items.map((item) => {
+    const row: DigestItem = {
+      id: String(item.id),
+      text: formatFlashLine(item.title),
+    }
+    if (item.url) row.url = item.url
+    return row
+  })
 }
 
 export function minutesToNextUpdate(): number {

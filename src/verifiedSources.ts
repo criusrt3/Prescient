@@ -78,6 +78,13 @@ export function documentSource(key: VerifiedDocumentKey): NewsSource {
   return { name: doc.name, url: doc.url }
 }
 
+/** 星球日报早晚报条目（快讯列表中可点击直达） */
+export const PLANET_DIGEST_RE = /^星球(早|午|晚)讯/
+
+export function isPlanetDigestTitle(title: string): boolean {
+  return PLANET_DIGEST_RE.test(title.replace(/^【快讯】\s*/, '').trim())
+}
+
 /** 仅 Odaily 文章、快讯与已核实文档页视为可点击来源 */
 export function isVerifiedSourceUrl(url: string | undefined): url is string {
   if (!url) return false

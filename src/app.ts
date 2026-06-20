@@ -240,13 +240,20 @@ export function mountApp(root: HTMLElement) {
     </section>
   `
 
+  const renderDigestLineText = (item: DigestItem) => {
+    if (item.url && isVerifiedSourceUrl(item.url)) {
+      return `<a class="digest-flash-link" href="${item.url}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.text)}</a>`
+    }
+    return escapeHtml(item.text)
+  }
+
   const renderDigestLines = (items: DigestItem[]) =>
     items
       .map(
         (item, i) => `
       <p class="digest-line">
         <span class="digest-index">${i + 1}.</span>
-        ${escapeHtml(item.text)}
+        ${renderDigestLineText(item)}
       </p>
     `,
       )

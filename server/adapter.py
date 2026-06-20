@@ -75,8 +75,25 @@ def _source(url: str, title: str = "") -> dict[str, str]:
 
 
 def _flash_text(title: str) -> str:
-    clean = title.replace("【快讯】", "").strip()
-    return clean if clean.endswith("；") else f"{clean}；"
+    clean = re.sub(r"^【快讯】\s*", "", title).strip()
+    return clean if clean.endswith(("；", ";")) else f"{clean}；"
+
+
+PLANET_DIGEST_RE = re.compile(r"^星球(早|午|晚)讯")
+ODAILY_ITEM_URL_RE = re.compile(r"^https://www\.odaily\.news/zh-CN/(post|newsflash)/\d+$")
+
+
+def _to_digest_item(flash: dict[str, Any]) -> dict[str, Any]:
+    title = flash["title"]
+    item: dict[str, Any] = {
+        "id": str(flash["id"]),
+        "text": _flash_text(title),
+    }
+    clean = re.sub(r"^【快讯】\s*", "", title).strip()
+    url = flash.get("url") or ""
+    if PLANET_DIGEST_RE.match(clean) and ODAILY_ITEM_URL_RE.match(url):
+        item["url"] = url
+    return item
 
 
 def _classify_level(title: str) -> str:
@@ -556,10 +573,10 @@ def _build_digest(flashes: list[dict[str, Any]], posts: list[dict[str, Any]]) ->
         "dateLabel": date_label,
         "updatedAt": fetched_at,
         "nextUpdateMinutes": next_mins,
-        "latestFlashes": [{"id": str(f["id"]), "text": _flash_text(f["title"])} for f in flashes[:15]],
+        "latestFlashes": [_to_digest_item(f) for f in flashes[:15]],
         "crypto": {
             "dateLabel": crypto_date_label,
-            "items": [{"id": str(f["id"]), "text": _flash_text(f["title"])} for f in crypto],
+            "items": [_to_digest_item(f) for f in crypto],
         },
         "hotTopic": {
             "title": hot["title"] if hot else "Odaily 星球日报",

@@ -128,11 +128,21 @@ def odaily_digest(latest_limit: int = 15, crypto_limit: int = 10):
     return {
         "fetchedAt": digest["updatedAt"],
         "latestFlashes": [
-            {"id": i["id"], "title": i["text"].rstrip("；"), "url": "", "publishedAt": None}
+            {
+                "id": i["id"],
+                "title": i["text"].rstrip("；"),
+                "url": i.get("url") or "",
+                "publishedAt": None,
+            }
             for i in digest["latestFlashes"]
         ],
         "cryptoFlashes": [
-            {"id": i["id"], "title": i["text"].rstrip("；"), "url": "", "publishedAt": None}
+            {
+                "id": i["id"],
+                "title": i["text"].rstrip("；"),
+                "url": i.get("url") or "",
+                "publishedAt": None,
+            }
             for i in digest["crypto"]["items"]
         ],
         "hotPost": {

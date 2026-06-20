@@ -354,6 +354,20 @@ function flashLine(title: string): string {
   return clean.endsWith('；') ? clean : `${clean}；`
 }
 
+const PLANET_DIGEST_RE = /^星球(早|午|晚)讯/
+const ODAILY_ITEM_URL_RE = /^https:\/\/www\.odaily\.news\/zh-CN\/(post|newsflash)\/\d+$/
+
+function isPlanetDigestTitle(title: string): boolean {
+  return PLANET_DIGEST_RE.test(title.replace(/^【快讯】\s*/, '').trim())
+}
+
+function toDigestItem(f: RssItem): { id: string; text: string; url?: string } {
+  const text = flashLine(f.title)
+  const url =
+    isPlanetDigestTitle(f.title) && ODAILY_ITEM_URL_RE.test(f.url) ? f.url : undefined
+  return url ? { id: f.id, text, url } : { id: f.id, text }
+}
+
 function isToday(iso?: string): boolean {
   if (!iso) return false
   const day = new Intl.DateTimeFormat('en-CA', {
@@ -541,10 +555,10 @@ function buildPrescient(flashes: RssItem[], posts: RssItem[]) {
     dateLabel: bjDateLabel(),
     updatedAt: `${bjDateLabel()} ${String(clock.hour).padStart(2, '0')}:${String(clock.minute).padStart(2, '0')}`,
     nextUpdateMinutes: nextMins,
-    latestFlashes: flashes.slice(0, 15).map((f) => ({ id: f.id, text: flashLine(f.title) })),
+    latestFlashes: flashes.slice(0, 15).map((f) => toDigestItem(f)),
     crypto: {
       dateLabel: cryptoDateLabel,
-      items: cryptoItems.map((f) => ({ id: f.id, text: flashLine(f.title) })),
+      items: cryptoItems.map((f) => toDigestItem(f)),
     },
     hotTopic: {
       title: hot?.title ?? 'Odaily 星球日报',

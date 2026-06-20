@@ -3,8 +3,6 @@
  * 供 Vite dev 中间件与 Vercel Serverless 共用。
  */
 
-import { fetchOdailyOpportunityFeed, type OdailyFeedItem } from './odailyWebApi'
-
 const OPPORTUNITY_PICKER_MONTHS = 4
 
 const RSS_FLASH = 'https://rss.odaily.news/rss/newsflash'
@@ -1293,6 +1291,7 @@ export async function loadOpportunitiesPayload() {
     return opportunitiesCache.payload
   }
 
+  const { fetchOdailyOpportunityFeed } = await import('./odailyWebApi.js')
   const { flashes, posts } = await fetchOdailyOpportunityFeed()
   const payload = buildCryptoOpportunities(
     flashes.map(feedItemToRss),
@@ -1302,7 +1301,13 @@ export async function loadOpportunitiesPayload() {
   return payload
 }
 
-function feedItemToRss(item: OdailyFeedItem): RssItem {
+function feedItemToRss(item: {
+  id: string
+  title: string
+  url: string
+  publishedAt?: string
+  body?: string
+}): RssItem {
   return {
     id: item.id,
     title: item.title,

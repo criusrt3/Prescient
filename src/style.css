@@ -710,7 +710,7 @@ body {
 /* Briefing grid */
 .briefing-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 16px;
 }
 
@@ -733,6 +733,52 @@ body {
   margin-bottom: 14px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+.brief-card-opp {
+  border-color: color-mix(in srgb, var(--opt) 28%, var(--border));
+}
+
+.brief-opp-item {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.brief-opp-kind {
+  font-size: 0.72rem;
+  color: var(--opt);
+  font-weight: 600;
+}
+
+.brief-opp-hint {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.brief-opp-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.brief-opp-link:hover {
+  color: var(--opt);
+  text-decoration: underline;
+}
+
+.brief-opp-more {
+  margin-top: 12px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--opt);
+  font-family: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.brief-opp-more:hover {
+  text-decoration: underline;
 }
 
 .compact-item {

@@ -1019,6 +1019,34 @@ def _build_opportunity_fallback_items(
     return items
 
 
+def _collect_opportunity_month_keys(pool: list[dict[str, Any]], days: int = 30) -> list[str]:
+    keys: set[str] = set()
+    keys.add(_bj_month_key())
+    cutoff = datetime.now(BJ).timestamp() - days * 24 * 60 * 60
+    keys.add(_bj_month_key(datetime.fromtimestamp(cutoff, BJ).isoformat()))
+    for flash in pool:
+        published = flash.get("publishedAt")
+        if published:
+            keys.add(_bj_month_key(published))
+    return sorted(keys, reverse=True)
+
+
+def _resolve_month_fallback(
+    month_key: str,
+    current_key: str,
+    opportunity_count: int,
+    month_fallback: list[dict[str, Any]],
+    recent_fallback: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    if opportunity_count > 0:
+        return [], None
+    if month_fallback:
+        return month_fallback, {"count": len(month_fallback), "scope": "month"}
+    if month_key == current_key and recent_fallback:
+        return recent_fallback, {"count": len(recent_fallback), "scope": "recent"}
+    return [], None
+
+
 def _build_crypto_opportunities(
     flashes: list[dict[str, Any]],
     posts: list[dict[str, Any]],
@@ -1042,20 +1070,20 @@ def _build_crypto_opportunities(
 
     recent_fallback = _build_opportunity_fallback_items(pool, opportunity_urls, None, 10)
     current_key = _bj_month_key()
-    month_keys = sorted({current_key, *by_month.keys()}, reverse=True)
+    month_keys = _collect_opportunity_month_keys(pool, 30)
     months = []
     for key in month_keys:
         items = by_month.get(key, [])
         buckets = _build_opportunity_buckets(items)
         label = _format_month_label(key)
         month_fallback = _build_opportunity_fallback_items(pool, opportunity_urls, key, 10)
-        fallback_items = month_fallback if month_fallback else (recent_fallback if not items else [])
-        fallback_meta = None
-        if not items and fallback_items:
-            fallback_meta = {
-                "count": len(fallback_items),
-                "scope": "month" if month_fallback else "recent",
-            }
+        fallback_items, fallback_meta = _resolve_month_fallback(
+            key,
+            current_key,
+            len(items),
+            month_fallback,
+            recent_fallback,
+        )
         months.append(
             {
                 "key": key,
@@ -1119,10 +1147,23 @@ def _is_crypto(title: str) -> bool:
     return bool(CRYPTO_KEYWORDS.search(title))
 
 
+def _pick_briefing_opportunities(opportunities: dict[str, Any]) -> list[dict[str, Any]]:
+    months = opportunities.get("months") or []
+    default_month = opportunities.get("defaultMonth")
+    slice_row = next((m for m in months if m.get("key") == default_month), months[0] if months else None)
+    if not slice_row:
+        return []
+    items: list[dict[str, Any]] = []
+    for bucket in slice_row.get("buckets") or []:
+        items.extend(bucket.get("items") or [])
+    return items[:3]
+
+
 def _build_briefing_one_liner(
     rising: list[dict[str, Any]],
     cooling: list[dict[str, Any]],
     top_shifts: list[dict[str, Any]],
+    top_opportunities: list[dict[str, Any]],
 ) -> str:
     hot = "、".join(item["name"] for item in rising[:2])
     cool = "、".join(item["name"] for item in cooling[:2])
@@ -1136,12 +1177,21 @@ def _build_briefing_one_liner(
         line += (
             f"已识别 {hard_count} 条硬事实变局，宜优先跟踪地缘与政策后续。"
             if hard_count > 0
-            else "共识仍在形成，建议结合下方四宫格交叉验证。"
+            else "共识仍在形成，建议结合下方模块交叉验证。"
         )
+        if top_opportunities:
+            opp_hint = "、".join(item["title"][:18] for item in top_opportunities[:2])
+            line += f" 币圈侧有 {len(top_opportunities)} 条可参与机会（{opp_hint}等）值得关注。"
         return line
 
     if top_shifts:
-        return f"今日共 {len(top_shifts)} 条核心变局待跟踪，详见 M1 今日变局。"
+        line = f"今日共 {len(top_shifts)} 条核心变局待跟踪，详见 M1 今日变局。"
+        if top_opportunities:
+            line += f" 另有 {len(top_opportunities)} 条币圈机会可查看 M6。"
+        return line
+
+    if top_opportunities:
+        return f"今日暂未形成清晰宏观主线，但识别到 {len(top_opportunities)} 条币圈参与机会，建议优先查看 M6。"
 
     return "正在汇聚 Odaily 最新报道。"
 
@@ -1161,10 +1211,12 @@ def build_prescient_payload(
     opportunities = _build_crypto_opportunities(flashes, posts)
 
     top_shifts = [s for s in shifts if s["level"] != "noise"][:3]
+    top_opportunities = _pick_briefing_opportunities(opportunities)
     one_liner = _build_briefing_one_liner(
         narratives["rising"],
         narratives["cooling"],
         top_shifts,
+        top_opportunities,
     )
 
     return {
@@ -1177,6 +1229,7 @@ def build_prescient_payload(
             "hotNarratives": narratives["rising"][:3],
             "topAgenda": agenda["tomorrow"][:3],
             "topDispute": disputes[0] if disputes else None,
+            "topOpportunities": top_opportunities,
         },
         "digest": digest,
         "shifts": shifts,

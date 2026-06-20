@@ -82,6 +82,8 @@ export interface BriefingData {
   hotNarratives: NarrativeItem[]
   topAgenda: AgendaItem[]
   topDispute: DisputeTopic | null
+  /** 当月值得关注的币圈参与机会（M6 摘要） */
+  topOpportunities: CryptoOpportunity[]
 }
 
 export interface DigestItem {
@@ -196,6 +198,24 @@ export function emptyOpportunityBuckets(): OpportunityBucket[] {
     count: 0,
     items: [],
   }))
+}
+
+export function formatOpportunityMonthLabel(monthKey: string): string {
+  const [year, month] = monthKey.split('-')
+  return `${year}年${month}月`
+}
+
+export function findOpportunityMonthSlice(
+  opp: CryptoOpportunitiesData,
+  monthKey: string,
+): OpportunityMonthSlice {
+  const found = opp.months.find((m) => m.key === monthKey)
+  if (found) return found
+  const label = formatOpportunityMonthLabel(monthKey)
+  return {
+    ...emptyOpportunityMonth(monthKey, label),
+    summary: `${label}暂未识别到明确可参与机会，可切换其他月份或稍后刷新。`,
+  }
 }
 
 export function emptyOpportunityMonth(key: string, label: string): OpportunityMonthSlice {
@@ -343,6 +363,18 @@ export const INTEREST_TAGS = [
   '地缘 / 能源',
   '商业 / 创业',
   '金融 / 市场',
+  '币圈',
+  '加密',
+  '空投',
+  'TGE / 发售',
 ] as const
 
 export type InterestTag = (typeof INTEREST_TAGS)[number]
+
+export const CRYPTO_INTEREST_TAGS: ReadonlySet<InterestTag> = new Set([
+  '币圈',
+  '加密',
+  '空投',
+  'TGE / 发售',
+  '金融 / 市场',
+])

@@ -1,4 +1,4 @@
-import { buildDataLoading, filterShiftsByInterests } from './dataEngine'
+import { applyInterestFilters, buildDataLoading } from './dataEngine'
 import { loadPrescientData } from './prescientClient'
 import { isVerifiedSourceUrl } from './verifiedSources'
 import {
@@ -16,9 +16,11 @@ import {
   type SignalLevel,
   type ConsensusStage,
   type CryptoOpportunity,
+  type BriefingData,
   type OpportunityFallbackItem,
   type NewsSource,
   type ThemeMode,
+  findOpportunityMonthSlice,
 } from './types'
 
 const THEME_KEY = 'prescient-theme'
@@ -70,9 +72,22 @@ export function mountApp(root: HTMLElement) {
     document.documentElement.setAttribute('data-theme', theme)
   }
 
+  root.addEventListener('click', (e) => {
+    const monthBtn = (e.target as HTMLElement).closest<HTMLElement>('[data-opp-month]')
+    if (!monthBtn) return
+    const key = monthBtn.getAttribute('data-opp-month')
+    const activeKey = opportunityMonth ?? data.opportunities.defaultMonth
+    if (!key || key === activeKey) return
+    opportunityMonth = key
+    render()
+    requestAnimationFrame(() => {
+      root.querySelector('#opp-panel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
+  })
+
   const render = () => {
     applyTheme()
-    const filteredShifts = filterShiftsByInterests(data.shifts, interests)
+    const view = applyInterestFilters(data, interests)
     root.innerHTML = `
       <div class="shell">
         ${renderHeader()}
@@ -80,7 +95,7 @@ export function mountApp(root: HTMLElement) {
           ${renderSidebar()}
           <main class="main">
             ${renderSearchBar()}
-            ${renderModulePanel(activeModule, data, filteredShifts)}
+            ${renderModulePanel(activeModule, data, view)}
             ${renderModuleFooter()}
           </main>
         </div>
@@ -145,7 +160,7 @@ export function mountApp(root: HTMLElement) {
 
       <section class="sidebar-block">
         <h3>关注领域</h3>
-        <p class="sidebar-hint">影响 M1 排序与全览简报变局展示</p>
+        <p class="sidebar-hint">影响 M1 排序、全览简报内容与币圈机会筛选</p>
         <div class="tag-list">
           ${INTEREST_TAGS.map(
             (tag) => `
@@ -182,14 +197,18 @@ export function mountApp(root: HTMLElement) {
     ${query ? `<p class="route-hint">${routeHint(query)}</p>` : ''}
   `
 
-  const renderModulePanel = (mod: ModuleId, d: PrescientData, shifts: ShiftItem[]) => {
+  const renderModulePanel = (
+    mod: ModuleId,
+    d: PrescientData,
+    view: ReturnType<typeof applyInterestFilters>,
+  ) => {
     switch (mod) {
       case 'briefing':
-        return renderBriefing(d, shifts)
+        return renderBriefing(view.briefing)
       case 'digest':
         return renderDigest(d)
       case 'm1':
-        return renderM1(shifts)
+        return renderM1(view.shifts)
       case 'm2':
         return renderM2(d)
       case 'm3':
@@ -199,13 +218,27 @@ export function mountApp(root: HTMLElement) {
       case 'm5':
         return renderM5(d)
       case 'm6':
-        return renderM6(d)
+        return renderM6(d, view.opportunities)
       default:
         return ''
     }
   }
 
-  const renderBriefing = (d: PrescientData, shifts: ShiftItem[]) => `
+  const renderBriefingOppCompact = (item: CryptoOpportunity) => {
+    const title =
+      item.url && isVerifiedSourceUrl(item.url)
+        ? `<a class="brief-opp-link" href="${item.url}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a>`
+        : escapeHtml(item.title)
+    return `
+      <div class="compact-item brief-opp-item">
+        <span class="brief-opp-kind">${escapeHtml(item.kindLabel)}</span>
+        <p class="compact-title">${title}</p>
+        ${item.highlight ? `<span class="brief-opp-hint">${escapeHtml(item.highlight)}</span>` : ''}
+      </div>
+    `
+  }
+
+  const renderBriefing = (briefing: BriefingData) => `
     <section class="panel">
       <div class="panel-head">
         <h2>🌅 全览简报</h2>
@@ -213,34 +246,43 @@ export function mountApp(root: HTMLElement) {
       </div>
       <div class="one-liner">
         <span class="one-liner-label">一句话主线</span>
-        <p>${escapeHtml(d.briefing.oneLiner)}</p>
+        <p>${escapeHtml(briefing.oneLiner)}</p>
       </div>
 
       <div class="briefing-grid">
         <div class="brief-card">
           <h3>M1 · 今日变局</h3>
-          ${shifts.slice(0, 3).map((s) => renderShiftCompact(s)).join('')}
+          ${briefing.topShifts.length ? briefing.topShifts.map((s) => renderShiftCompact(s)).join('') : '<p class="muted">暂无匹配变局</p>'}
         </div>
         <div class="brief-card">
           <h3>M2 · 叙事温度 Top 3</h3>
-          ${d.briefing.hotNarratives.map((n) => renderHeatRow(n)).join('')}
+          ${briefing.hotNarratives.length ? briefing.hotNarratives.map((n) => renderHeatRow(n)).join('') : '<p class="muted">暂无匹配叙事</p>'}
         </div>
         <div class="brief-card">
           <h3>M3 · 明日议程</h3>
-          ${d.briefing.topAgenda.map((a) => renderAgendaCompact(a)).join('')}
+          ${briefing.topAgenda.length ? briefing.topAgenda.map((a) => renderAgendaCompact(a)).join('') : '<p class="muted">暂无匹配议程</p>'}
         </div>
         <div class="brief-card">
           <h3>M4 · 高分歧话题</h3>
           ${
-            d.briefing.topDispute
+            briefing.topDispute
               ? `
-            <p class="dispute-name">${escapeHtml(d.briefing.topDispute.name)}</p>
-            <div class="dispute-score">分歧指数 ${d.briefing.topDispute.score}/100</div>
-            <p class="muted">${escapeHtml(d.briefing.topDispute.insight)}</p>
-            ${renderSourceActions(d.briefing.topDispute.sources, { compact: true })}
+            <p class="dispute-name">${escapeHtml(briefing.topDispute.name)}</p>
+            <div class="dispute-score">分歧指数 ${briefing.topDispute.score}/100</div>
+            <p class="muted">${escapeHtml(briefing.topDispute.insight)}</p>
+            ${renderSourceActions(briefing.topDispute.sources, { compact: true })}
           `
               : '<p class="muted">暂无</p>'
           }
+        </div>
+        <div class="brief-card brief-card-opp">
+          <h3>M6 · 币圈机会</h3>
+          ${
+            briefing.topOpportunities.length
+              ? briefing.topOpportunities.map((item) => renderBriefingOppCompact(item)).join('')
+              : '<p class="muted">本月暂未识别到明确参与机会</p>'
+          }
+          <button type="button" class="brief-opp-more" data-goto-module="m6">查看全部币圈机会 →</button>
         </div>
       </div>
     </section>
@@ -573,13 +615,13 @@ export function mountApp(root: HTMLElement) {
     `
   }
 
-  const renderM6 = (d: PrescientData) => {
-    const opp = d.opportunities
+  const renderM6 = (d: PrescientData, opportunities = d.opportunities) => {
+    const opp = opportunities
     const monthKey = opportunityMonth ?? opp.defaultMonth
-    const slice = opp.months.find((m) => m.key === monthKey) ?? opp.months[0]
-    const activeBuckets = slice?.buckets.filter((b) => b.count > 0) ?? []
-    const fallbackItems = slice?.fallbackItems ?? []
-    const fallbackScope = slice?.fallbackScope ?? null
+    const slice = findOpportunityMonthSlice(opp, monthKey)
+    const activeBuckets = slice.buckets.filter((b) => b.count > 0)
+    const fallbackItems = slice.fallbackItems
+    const fallbackScope = slice.fallbackScope ?? null
 
     const monthNav = `
       <nav class="opp-month-nav" aria-label="按月筛选">
@@ -590,6 +632,7 @@ export function mountApp(root: HTMLElement) {
             type="button"
             class="opp-month-btn ${monthKey === m.key ? 'active' : ''}"
             data-opp-month="${m.key}"
+            aria-pressed="${monthKey === m.key ? 'true' : 'false'}"
           >
             ${escapeHtml(m.label)}
             <span class="opp-month-count">${m.totalCount}</span>
@@ -601,16 +644,16 @@ export function mountApp(root: HTMLElement) {
     `
 
     return `
-    <section class="panel">
+    <section class="panel" id="opp-panel">
       <div class="panel-head">
         <h2>🎯 币圈机会</h2>
         <span class="divider-line"></span>
-        <p class="panel-desc">项目融资、TGE / 发售、空投与抽奖等可参与机会汇总（${escapeHtml(opp.rangeLabel)}）</p>
+        <p class="panel-desc">当前查看 <strong>${escapeHtml(slice.label)}</strong> · 项目融资、TGE / 发售、空投与抽奖等可参与机会（${escapeHtml(opp.rangeLabel)}）</p>
       </div>
       ${monthNav}
       <div class="ai-box tip">
         <strong>📋 参与机会摘要</strong>
-        <p>${escapeHtml(slice?.summary ?? '暂无数据')}</p>
+        <p>${escapeHtml(slice.summary)}</p>
         <p class="opp-meta muted">更新 ${escapeHtml(opp.updatedAt)} · 数据来自 Odaily · ${escapeHtml(opp.rangeLabel)}，参与前请核实官方信息</p>
       </div>
       ${
@@ -876,9 +919,9 @@ export function mountApp(root: HTMLElement) {
       })
     })
 
-    root.querySelectorAll('[data-opp-month]').forEach((el) => {
+    root.querySelectorAll('[data-goto-module]').forEach((el) => {
       el.addEventListener('click', () => {
-        opportunityMonth = (el as HTMLElement).dataset.oppMonth ?? null
+        activeModule = ((el as HTMLElement).dataset.gotoModule ?? 'briefing') as ModuleId
         render()
       })
     })

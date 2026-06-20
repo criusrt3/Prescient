@@ -1,4 +1,11 @@
-import type { PrescientData } from './types'
+import type {
+  CryptoOpportunity,
+  CryptoOpportunitiesData,
+  InterestTag,
+  OpportunityFallbackItem,
+  PrescientData,
+} from './types'
+import { CRYPTO_INTEREST_TAGS } from './types'
 import { buildDigestFallback, buildDigestLoading } from './digestEngine'
 import { emptyOpportunityMonth } from './types'
 
@@ -26,6 +33,138 @@ const emptyOpportunities = () => {
   }
 }
 
+export const INTEREST_MATCHERS: Record<InterestTag, RegExp> = {
+  '科技 / AI': /AI|OpenAI|科技|监管|法案|半导体|芯片|网信办|LifeSciBench|英伟达/i,
+  '宏观 / 政策': /宏观|政策|美联储|央行|降息|通胀|CPI|非农|标普|GDP|利率/i,
+  '地缘 / 能源': /地缘|能源|战争|伊朗|以色列|黎巴嫩|停火|导弹|石油|海峡|中东/i,
+  '商业 / 创业': /商业|创业|IPO|上市|融资|初创|Kalshi|预测市场/i,
+  '金融 / 市场': /金融|市场|比特币|BTC|ETH|加密|DeFi|美股|ETF|币安|Tether|稳定币|Strategy/i,
+  币圈: /币圈|比特币|BTC|ETH|以太坊|加密市场|数字货币|虚拟货币|Meme|山寨|Solana|SOL/i,
+  加密: /加密|Crypto|DeFi|Web3|区块链|代币|NFT|稳定币|Layer2|L2|智能合约|链上/i,
+  空投: /空投|airdrop|快照|申领|空头代币|领取资格/i,
+  'TGE / 发售': /TGE|IDO|IEO|Launchpool|打新|预售|代币发行|公开发售|认购/i,
+}
+
+export function matchesInterestTags(text: string, interests: string[]): boolean {
+  if (interests.length === 0) return true
+  return interests.some((tag) => INTEREST_MATCHERS[tag as InterestTag]?.test(text))
+}
+
+export function filterListByInterests<T>(
+  items: T[],
+  getText: (item: T) => string,
+  interests: string[],
+): T[] {
+  if (interests.length === 0) return items
+  const matched = items.filter((item) => matchesInterestTags(getText(item), interests))
+  return matched.length > 0 ? matched : items
+}
+
+export function hasCryptoInterest(interests: string[]): boolean {
+  return interests.some((tag) => CRYPTO_INTEREST_TAGS.has(tag as InterestTag))
+}
+
+function matchesOpportunityInterests(item: CryptoOpportunity, interests: string[]): boolean {
+  const text = `${item.title} ${item.summary} ${item.kindLabel} ${item.highlight ?? ''}`
+  if (matchesInterestTags(text, interests)) return true
+  if (interests.includes('空投') && item.kind === 'airdrop') return true
+  if (interests.includes('TGE / 发售') && item.kind === 'tge') return true
+  if (
+    (interests.includes('币圈') || interests.includes('加密')) &&
+    ['fundraising', 'lottery', 'tge', 'airdrop'].includes(item.kind)
+  ) {
+    return true
+  }
+  return false
+}
+
+function filterOpportunityMonthSlice<T extends { buckets: CryptoOpportunitiesData['months'][0]['buckets']; fallbackItems: OpportunityFallbackItem[] }>(
+  slice: T,
+  interests: string[],
+  filterItem: (item: CryptoOpportunity) => boolean,
+): T {
+  const buckets = slice.buckets.map((bucket) => {
+    const items = bucket.items.filter(filterItem)
+    return { ...bucket, items, count: items.length }
+  })
+  const totalCount = buckets.reduce((sum, bucket) => sum + bucket.count, 0)
+  const fallbackItems =
+    totalCount === 0
+      ? slice.fallbackItems.filter((item) =>
+          matchesInterestTags(`${item.title} ${item.summary}`, interests),
+        )
+      : []
+  return {
+    ...slice,
+    buckets,
+    totalCount,
+    fallbackItems,
+    ...(totalCount === 0 && fallbackItems.length === 0 ? { fallbackScope: undefined } : {}),
+  } as T
+}
+
+export function filterOpportunitiesByInterests(
+  opportunities: CryptoOpportunitiesData,
+  interests: string[],
+): CryptoOpportunitiesData {
+  if (interests.length === 0 || !hasCryptoInterest(interests)) return opportunities
+  const filterItem = (item: CryptoOpportunity) => matchesOpportunityInterests(item, interests)
+  return {
+    ...opportunities,
+    months: opportunities.months.map((month) => filterOpportunityMonthSlice(month, interests, filterItem)),
+    recentFallback: opportunities.recentFallback.filter((item) =>
+      matchesInterestTags(`${item.title} ${item.summary}`, interests),
+    ),
+  }
+}
+
+export interface InterestFilteredView {
+  shifts: PrescientData['shifts']
+  briefing: PrescientData['briefing']
+  opportunities: CryptoOpportunitiesData
+}
+
+export function applyInterestFilters(data: PrescientData, interests: string[]): InterestFilteredView {
+  const shifts = filterShiftsByInterests(data.shifts, interests)
+  const opportunities = filterOpportunitiesByInterests(data.opportunities, interests)
+
+  if (interests.length === 0) {
+    return { shifts, briefing: data.briefing, opportunities }
+  }
+
+  const topDispute = data.briefing.topDispute
+    ? filterListByInterests(
+        [data.briefing.topDispute],
+        (d) => `${d.name} ${d.insight} ${d.camps.map((c) => c.quote).join(' ')}`,
+        interests,
+      )[0] ?? data.briefing.topDispute
+    : null
+
+  const briefing = {
+    ...data.briefing,
+    topShifts: filterListByInterests(
+      data.briefing.topShifts,
+      (s) => `${s.title} ${s.analysis} ${s.domains.join(' ')}`,
+      interests,
+    ).slice(0, 3),
+    hotNarratives: filterListByInterests(data.briefing.hotNarratives, (n) => n.name, interests).slice(0, 3),
+    topAgenda: filterListByInterests(
+      data.briefing.topAgenda,
+      (a) => `${a.title} ${a.impact}`,
+      interests,
+    ).slice(0, 3),
+    topDispute,
+    topOpportunities:
+      hasCryptoInterest(interests)
+        ? data.briefing.topOpportunities
+            .filter((item) => matchesOpportunityInterests(item, interests))
+            .slice(0, 3)
+        : [],
+  }
+
+  return { shifts, briefing, opportunities }
+}
+
 export function buildDataLoading(): PrescientData {
   const digest = buildDigestLoading()
   return {
@@ -38,6 +177,7 @@ export function buildDataLoading(): PrescientData {
       hotNarratives: [],
       topAgenda: [],
       topDispute: null,
+      topOpportunities: [],
     },
     digest,
     shifts: [],
@@ -71,6 +211,7 @@ export function buildDataFallback(error: string): PrescientData {
       hotNarratives: [],
       topAgenda: [],
       topDispute: null,
+      topOpportunities: [],
     },
     digest,
     shifts: [],
@@ -107,14 +248,6 @@ export function buildDataFallback(error: string): PrescientData {
   }
 }
 
-const INTEREST_MATCHERS: Record<string, RegExp> = {
-  '科技 / AI': /AI|OpenAI|科技|监管|法案|半导体|芯片|网信办|LifeSciBench|英伟达/i,
-  '宏观 / 政策': /宏观|政策|美联储|央行|降息|通胀|CPI|非农|标普|GDP|利率|央行/i,
-  '地缘 / 能源': /地缘|能源|战争|伊朗|以色列|黎巴嫩|停火|导弹|石油|海峡|中东/i,
-  '商业 / 创业': /商业|创业|IPO|上市|融资|初创|交易所|Kalshi|预测市场/i,
-  '金融 / 市场': /金融|市场|比特币|BTC|ETH|加密|DeFi|美股|ETF|币安|Tether|稳定币|Strategy/i,
-}
-
 export function filterShiftsByInterests(
   shifts: PrescientData['shifts'],
   interests: string[],
@@ -123,7 +256,7 @@ export function filterShiftsByInterests(
   return shifts
     .map((s) => {
       const text = `${s.title} ${s.analysis} ${s.domains.join(' ')}`
-      const match = interests.some((tag) => INTEREST_MATCHERS[tag]?.test(text))
+      const match = matchesInterestTags(text, interests)
       return { ...s, relevance: match ? (s.relevance ?? 3) + 2 : s.relevance }
     })
     .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0))

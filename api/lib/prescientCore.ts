@@ -599,6 +599,7 @@ function buildBriefingOneLiner(
   rising: { name: string }[],
   cooling: { name: string }[],
   topShifts: { level: string }[],
+  topOpportunities: { kindLabel: string; title: string }[],
 ): string {
   const hot = rising.map((r) => r.name).slice(0, 2).join('、')
   const cool = cooling.map((c) => c.name).slice(0, 2).join('、')
@@ -611,15 +612,38 @@ function buildBriefingOneLiner(
     line +=
       hardCount > 0
         ? `已识别 ${hardCount} 条硬事实变局，宜优先跟踪地缘与政策后续。`
-        : '共识仍在形成，建议结合下方四宫格交叉验证。'
+        : '共识仍在形成，建议结合下方模块交叉验证。'
+    if (topOpportunities.length) {
+      const oppHint = topOpportunities
+        .slice(0, 2)
+        .map((o) => o.title.slice(0, 18))
+        .join('、')
+      line += ` 币圈侧有 ${topOpportunities.length} 条可参与机会（${oppHint}等）值得关注。`
+    }
     return line
   }
 
   if (topShifts.length) {
-    return `今日共 ${topShifts.length} 条核心变局待跟踪，详见 M1 今日变局。`
+    let line = `今日共 ${topShifts.length} 条核心变局待跟踪，详见 M1 今日变局。`
+    if (topOpportunities.length) {
+      line += ` 另有 ${topOpportunities.length} 条币圈机会可查看 M6。`
+    }
+    return line
+  }
+
+  if (topOpportunities.length) {
+    return `今日暂未形成清晰宏观主线，但识别到 ${topOpportunities.length} 条币圈参与机会，建议优先查看 M6。`
   }
 
   return '正在汇聚 Odaily 最新报道。'
+}
+
+function pickBriefingOpportunities(
+  opportunities: ReturnType<typeof buildCryptoOpportunities>,
+): ReturnType<typeof toCryptoOpportunity>[] {
+  const slice = opportunities.months.find((m) => m.key === opportunities.defaultMonth) ?? opportunities.months[0]
+  if (!slice) return []
+  return slice.buckets.flatMap((bucket) => bucket.items).slice(0, 3)
 }
 
 function buildCryptoItems(pool: RssItem[]): RssItem[] {
@@ -937,6 +961,37 @@ function buildMonthOpportunitiesSummary(
   return line
 }
 
+function collectOpportunityMonthKeys(pool: RssItem[], days = 30): string[] {
+  const keys = new Set<string>()
+  keys.add(bjMonthKey())
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000
+  keys.add(bjMonthKey(new Date(cutoff).toISOString()))
+  for (const f of pool) {
+    if (f.publishedAt) keys.add(bjMonthKey(f.publishedAt))
+  }
+  return [...keys].sort((a, b) => b.localeCompare(a))
+}
+
+function resolveMonthFallback(
+  monthKey: string,
+  currentKey: string,
+  opportunityCount: number,
+  monthFallback: ReturnType<typeof toOpportunityFallback>[],
+  recentFallback: ReturnType<typeof toOpportunityFallback>[],
+): {
+  items: ReturnType<typeof toOpportunityFallback>[]
+  meta: { count: number; scope: 'month' | 'recent' } | null
+} {
+  if (opportunityCount > 0) return { items: [], meta: null }
+  if (monthFallback.length > 0) {
+    return { items: monthFallback, meta: { count: monthFallback.length, scope: 'month' } }
+  }
+  if (monthKey === currentKey && recentFallback.length > 0) {
+    return { items: recentFallback, meta: { count: recentFallback.length, scope: 'recent' } }
+  }
+  return { items: [], meta: null }
+}
+
 function buildCryptoOpportunities(flashes: RssItem[], posts: RssItem[]) {
   const pool = recentMonthPool(flashes, posts, 30)
   const byMonth = new Map<string, ReturnType<typeof toCryptoOpportunity>[]>()
@@ -957,22 +1012,20 @@ function buildCryptoOpportunities(flashes: RssItem[], posts: RssItem[]) {
 
   const recentFallback = buildOpportunityFallbackItems(pool, opportunityUrls, null, 10)
   const currentKey = bjMonthKey()
-  const monthKeys = [...new Set([currentKey, ...byMonth.keys()])].sort((a, b) => b.localeCompare(a))
+  const monthKeys = collectOpportunityMonthKeys(pool, 30)
 
   const months = monthKeys.map((key) => {
     const items = byMonth.get(key) ?? []
     const buckets = buildOpportunityBuckets(items)
     const label = formatMonthLabel(key)
     const monthFallback = buildOpportunityFallbackItems(pool, opportunityUrls, key, 10)
-    const fallbackItems =
-      monthFallback.length > 0 ? monthFallback : items.length === 0 ? recentFallback : []
-    const fallbackMeta =
-      items.length === 0 && fallbackItems.length > 0
-        ? {
-            count: fallbackItems.length,
-            scope: (monthFallback.length > 0 ? 'month' : 'recent') as 'month' | 'recent',
-          }
-        : null
+    const { items: fallbackItems, meta: fallbackMeta } = resolveMonthFallback(
+      key,
+      currentKey,
+      items.length,
+      monthFallback,
+      recentFallback,
+    )
     return {
       key,
       label,
@@ -1079,17 +1132,19 @@ function buildPrescient(flashes: RssItem[], posts: RssItem[]) {
   const topShifts = shifts.filter((s) => s.level !== 'noise').slice(0, 3)
   const rawFlashes = buildRawFlashes(flashes, rising)
   const opportunities = buildCryptoOpportunities(flashes, posts)
+  const topOpportunities = pickBriefingOpportunities(opportunities)
 
   return {
     live: true,
     sourceLabel: 'Odaily RSS 实时',
     briefing: {
       generatedAt: clock.label,
-      oneLiner: buildBriefingOneLiner(rising, cooling, topShifts),
+      oneLiner: buildBriefingOneLiner(rising, cooling, topShifts, topOpportunities),
       topShifts,
       hotNarratives: rising.slice(0, 3),
       topAgenda: agenda.tomorrow.slice(0, 3),
       topDispute: disputes[0] ?? null,
+      topOpportunities,
     },
     digest,
     shifts,

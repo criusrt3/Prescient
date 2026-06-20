@@ -489,6 +489,30 @@ body {
   margin-bottom: 0;
 }
 
+.digest-line-with-source .digest-line-main {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.digest-source-link {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  color: var(--opt);
+  text-decoration: none;
+  border: 1px solid color-mix(in srgb, var(--opt) 35%, transparent);
+  border-radius: 999px;
+  padding: 1px 8px;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.digest-source-link:hover {
+  color: var(--text);
+  border-color: var(--opt);
+  background: color-mix(in srgb, var(--opt) 10%, transparent);
+}
+
 .digest-index {
   font-weight: 500;
 }
@@ -1090,6 +1114,61 @@ body {
 .dispute-score-lg small {
   font-size: 0.9rem;
   color: var(--text-dim);
+}
+
+.dispute-related {
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+}
+
+.dispute-related-title {
+  margin: 0 0 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.dispute-related-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dispute-related-item {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 10px;
+  align-items: start;
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.dispute-related-time {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.dispute-related-link {
+  color: var(--text);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.dispute-related-link:hover {
+  color: var(--opt);
+  border-bottom-color: var(--opt);
+}
+
+.dispute-related-text {
+  color: var(--text-muted);
 }
 
 .dispute-name {

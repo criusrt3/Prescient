@@ -189,11 +189,98 @@ def _to_digest_item(flash: dict[str, Any]) -> dict[str, Any]:
         "id": str(flash["id"]),
         "text": _flash_text(title),
     }
-    clean = re.sub(r"^【快讯】\s*", "", title).strip()
     url = flash.get("url") or ""
-    if PLANET_DIGEST_RE.match(clean) and ODAILY_ITEM_URL_RE.match(url):
+    if ODAILY_ITEM_URL_RE.match(url):
         item["url"] = url
     return item
+
+
+def _verified_flash_url(url: str) -> str | None:
+    return url if ODAILY_ITEM_URL_RE.match(url) else None
+
+
+def _format_flash_time_bj(iso: str | None) -> str:
+    if not iso:
+        return "--:--"
+    try:
+        dt = datetime.fromisoformat(iso)
+        return dt.astimezone(BJ).strftime("%H:%M")
+    except ValueError:
+        return "--:--"
+
+
+def _flash_time_delta_ms(a: dict[str, Any], b: dict[str, Any]) -> float:
+    a_iso = a.get("publishedAt")
+    b_iso = b.get("publishedAt")
+    if not a_iso or not b_iso:
+        return float("inf")
+    try:
+        a_ts = datetime.fromisoformat(a_iso).timestamp()
+        b_ts = datetime.fromisoformat(b_iso).timestamp()
+        return abs(a_ts - b_ts)
+    except ValueError:
+        return float("inf")
+
+
+def _to_dispute_related_flash(flash: dict[str, Any]) -> dict[str, Any]:
+    title = _flash_title_clean(flash["title"])
+    url = flash.get("url") or ""
+    row: dict[str, Any] = {
+        "id": str(flash["id"]),
+        "title": title,
+        "time": _format_flash_time_bj(flash.get("publishedAt")),
+    }
+    verified = _verified_flash_url(url)
+    if verified:
+        row["url"] = verified
+    return row
+
+
+def _pick_dispute_related_flashes(
+    main: dict[str, Any],
+    topic_related: list[dict[str, Any]],
+    today_flashes: list[dict[str, Any]],
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    main_url = main.get("url") or ""
+    seen = {main_url} if main_url else set()
+    pool = [f for f in topic_related if f.get("url") and f.get("url") != main_url]
+
+    if len(pool) < 3:
+        main_iso = main.get("publishedAt")
+        if main_iso:
+            try:
+                main_ts = datetime.fromisoformat(main_iso).timestamp()
+            except ValueError:
+                main_ts = None
+        else:
+            main_ts = None
+        if main_ts is not None:
+            window = 3 * 60 * 60
+            for flash in today_flashes:
+                url = flash.get("url") or ""
+                if not url or url in seen or url == main_url:
+                    continue
+                iso = flash.get("publishedAt")
+                if not iso:
+                    continue
+                try:
+                    delta = abs(datetime.fromisoformat(iso).timestamp() - main_ts)
+                except ValueError:
+                    continue
+                if delta <= window:
+                    pool.append(flash)
+
+    unique: list[dict[str, Any]] = []
+    for flash in pool:
+        url = flash.get("url") or ""
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        unique.append(flash)
+
+    unique.sort(key=lambda f: _flash_time_delta_ms(main, f))
+    return [_to_dispute_related_flash(f) for f in unique[:limit]]
 
 
 def _classify_level(title: str) -> str:
@@ -457,12 +544,19 @@ def _build_disputes(
 ) -> list[dict[str, Any]]:
     topic_map = {name: pattern for name, pattern in NARRATIVE_TOPICS}
     disputes: list[dict[str, Any]] = []
+    today_flashes = [f for f in flashes if _is_today(f.get("publishedAt"))]
 
     for i, topic in enumerate(rising[:3]):
         name = topic["name"]
         pattern = topic_map.get(name)
-        related = [f for f in flashes if pattern and pattern.search(f["title"])] if pattern else []
-        candidate = related[0] if related else (flashes[i] if i < len(flashes) else None)
+        related = (
+            [f for f in flashes if pattern and pattern.search(f"{f['title']} {f.get('body') or ''}")]
+            if pattern
+            else []
+        )
+        today_related = [f for f in related if _is_today(f.get("publishedAt"))]
+        related_pool = today_related if len(today_related) >= 2 else related[:10]
+        candidate = related_pool[0] if related_pool else (flashes[i] if i < len(flashes) else None)
         if not candidate:
             continue
         url = candidate.get("url") or ""
@@ -475,6 +569,7 @@ def _build_disputes(
                 "name": name,
                 "score": topic["heat"],
                 "sources": [src] if src else [],
+                "relatedFlashes": _pick_dispute_related_flashes(candidate, related_pool, today_flashes),
                 "camps": [
                     {
                         "side": "optimistic",
@@ -497,7 +592,7 @@ def _build_disputes(
                         "source": src,
                     },
                 ],
-                "insight": f"「{name}」相关报道今日出现 {len(related) or 1} 条，分歧指数 {topic['heat']}。",
+                "insight": f"「{name}」相关报道今日出现 {len(today_related) or len(related) or 1} 条，分歧指数 {topic['heat']}。",
             }
         )
 
@@ -518,6 +613,7 @@ def _build_disputes(
             "name": f"{title[:28]}…" if len(title) > 28 else title,
             "score": 68,
             "sources": [src] if src else [],
+            "relatedFlashes": _pick_dispute_related_flashes(candidate, today_flashes, today_flashes),
             "camps": [
                 {
                     "side": "optimistic",

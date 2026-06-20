@@ -43,6 +43,15 @@ export interface DisputeTopic {
     source?: NewsSource
   }[]
   insight: string
+  /** 与主报道时间接近的同期相关快讯 */
+  relatedFlashes?: DisputeRelatedFlash[]
+}
+
+export interface DisputeRelatedFlash {
+  id: string
+  title: string
+  time: string
+  url?: string
 }
 
 export interface AgendaItem {

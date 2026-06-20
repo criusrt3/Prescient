@@ -248,13 +248,21 @@ export function mountApp(root: HTMLElement) {
     return escapeHtml(item.text)
   }
 
-  const renderDigestLines = (items: DigestItem[]) =>
+  const renderDigestSourceLink = (item: DigestItem) => {
+    if (!item.url || !isVerifiedSourceUrl(item.url)) return ''
+    return `<a class="digest-source-link" href="${item.url}" target="_blank" rel="noopener noreferrer" title="打开 Odaily 原文">来源</a>`
+  }
+
+  const renderDigestLines = (items: DigestItem[], showSourceLink = false) =>
     items
       .map(
         (item, i) => `
-      <p class="digest-line">
+      <p class="digest-line${showSourceLink ? ' digest-line-with-source' : ''}">
         <span class="digest-index">${i + 1}.</span>
-        ${renderDigestLineText(item)}
+        <span class="digest-line-main">
+          ${renderDigestLineText(item)}
+          ${showSourceLink ? renderDigestSourceLink(item) : ''}
+        </span>
       </p>
     `,
       )
@@ -317,7 +325,7 @@ export function mountApp(root: HTMLElement) {
 
           const hourlyBody =
             hourlyItems.length > 0
-              ? renderDigestLines(hourlyItems)
+              ? renderDigestLines(hourlyItems, Boolean(activeCategory))
               : `<p class="digest-line muted">今日暂无「${escapeHtml(activeCategory?.label ?? '')}」相关快讯，请切换其他分类或稍后刷新。</p>`
 
           return `
@@ -587,6 +595,31 @@ export function mountApp(root: HTMLElement) {
     </div>
   `
 
+  const renderDisputeRelatedFlashes = (items: DisputeTopic['relatedFlashes']) => {
+    if (!items?.length) return ''
+    return `
+      <div class="dispute-related">
+        <h4 class="dispute-related-title">同期相关快讯</h4>
+        <ul class="dispute-related-list">
+          ${items
+            .map(
+              (item) => `
+            <li class="dispute-related-item">
+              <span class="dispute-related-time">${escapeHtml(item.time)}</span>
+              ${
+                item.url && isVerifiedSourceUrl(item.url)
+                  ? `<a class="dispute-related-link" href="${item.url}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a>`
+                  : `<span class="dispute-related-text">${escapeHtml(item.title)}</span>`
+              }
+            </li>
+          `,
+            )
+            .join('')}
+        </ul>
+      </div>
+    `
+  }
+
   const renderDisputeCard = (topic: DisputeTopic) => `
     <article class="dispute-card">
       <div class="dispute-head">
@@ -596,6 +629,7 @@ export function mountApp(root: HTMLElement) {
           ${renderSourceActions(topic.sources, { compact: true })}
         </div>
       </div>
+      ${renderDisputeRelatedFlashes(topic.relatedFlashes)}
       <div class="camps">
         ${topic.camps
           .map((c) => {

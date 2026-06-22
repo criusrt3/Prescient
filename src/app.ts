@@ -1,6 +1,6 @@
 import { applyInterestFilters, buildDataLoading } from './dataEngine'
 import { loadOpportunitiesInto, loadPrescientData } from './prescientClient'
-import { isVerifiedSourceUrl, resolveSourceUrl } from './verifiedSources'
+import { resolveSourceUrl } from './verifiedSources'
 import {
   INTEREST_TAGS,
   MODULES,
@@ -982,7 +982,7 @@ function renderSourceActions(
         const url = resolveSourceUrl(s.url)
         return url ? { name: s.name, url } : null
       })
-      .filter((s): s is NewsSource => Boolean(s)) ?? []
+      .filter((s): s is { name: string; url: string } => Boolean(s)) ?? []
   if (!linked.length) return ''
   const cls = ['source-actions', options.compact && 'compact', options.inline && 'inline']
     .filter(Boolean)
